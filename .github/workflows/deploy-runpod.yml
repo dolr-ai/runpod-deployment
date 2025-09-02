@@ -132,11 +132,12 @@ jobs:
         if [ -z "$ENDPOINT_ID" ]; then
           echo "📡 Creating new endpoint..."
           
-          # Create template first (with all required fields)
+          # Create template with unique name (using commit SHA)
+          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo '${IMAGE_URL}' | cut -d':' -f2 | head -c 8)"
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${ENDPOINT_NAME}-template\\\", imageName: \\\"${IMAGE_URL}\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
+            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${TEMPLATE_NAME}\\\", imageName: \\\"${IMAGE_URL}\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
           
           echo "Template Response: $TEMPLATE_RESPONSE"
           TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id')
@@ -165,11 +166,13 @@ jobs:
           fi
         else
           echo "🔄 Found existing endpoint: ${ENDPOINT_ID}"
-          # Update template with new image (with all required fields)
+          # Create new template with updated image (unique name)
+          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo '${IMAGE_URL}' | cut -d':' -f2 | head -c 8)"
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${ENDPOINT_NAME}-template\\\", imageName: \\\"${IMAGE_URL}\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
+            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${TEMPLATE_NAME}\\\", imageName: \\\"${IMAGE_URL}\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
+          echo "🔄 Created new template version: ${TEMPLATE_NAME}"
           echo "✅ Updated template for existing endpoint"
         fi
         
