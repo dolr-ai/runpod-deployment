@@ -1,0 +1,220 @@
+name: Deploy NVIDIA-SMI to RunPod Serverless
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      gpu_type:
+        description: 'GPU type'
+        required: false
+        default: 'NVIDIA RTX A4000'
+        type: choice
+        options:
+          - NVIDIA A40
+          - NVIDIA RTX A5000
+          - NVIDIA RTX A4000
+          - NVIDIA RTX 4090
+          - NVIDIA RTX 3090
+
+env:
+  GAR_LOCATION: us-central1
+  GAR_REPOSITORY: talking-head-registry
+  PROJECT_ID: jay-dhanwant-experiments
+  IMAGE_NAME: runpod-nvidia-smi
+
+jobs:
+  deploy:
+    name: Build and Deploy to RunPod
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+    
+    - name: Configure Docker for GAR
+      run: |
+        gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+    
+    - name: Build and push to GAR
+      id: build
+      run: |
+        IMAGE_URL="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}"
+        
+        # Build and tag image
+        docker buildx build --platform linux/amd64 \
+          -t "${IMAGE_URL}:latest" \
+          -t "${IMAGE_URL}:${{ github.sha }}" \
+          --push .
+        
+        echo "✅ Built and pushed: ${IMAGE_URL}:${{ github.sha }}"
+        echo "image_url=${IMAGE_URL}:latest" >> $GITHUB_OUTPUT
+    
+    - name: Install RunPod CLI dependencies
+      run: |
+        pip install requests
+    
+    - name: Create or Update RunPod Template
+      id: template
+      run: |
+        IMAGE_URL="${{ steps.build.outputs.image_url }}"
+        TEMPLATE_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}-$(date +%s)"
+        
+        echo "Creating template: $TEMPLATE_NAME"
+        echo "Image: $IMAGE_URL"
+        
+        # Create template using GraphQL
+        TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+          -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d @- << EOF
+        {
+          "query": "mutation { saveTemplate(input: { name: \"$TEMPLATE_NAME\", imageName: \"$IMAGE_URL\", dockerArgs: \"\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \"CUDA_VISIBLE_DEVICES\", value: \"0\"}] }) { id name } }"
+        }
+        EOF
+        )
+        
+        echo "Template response: $TEMPLATE_RESPONSE"
+        
+        TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id')
+        
+        if [ "$TEMPLATE_ID" = "null" ]; then
+          echo "❌ Template creation failed"
+          echo "$TEMPLATE_RESPONSE"
+          exit 1
+        fi
+        
+        echo "✅ Template created: $TEMPLATE_ID"
+        echo "template_id=$TEMPLATE_ID" >> $GITHUB_OUTPUT
+        echo "template_name=$TEMPLATE_NAME" >> $GITHUB_OUTPUT
+    
+    - name: Create or Update RunPod Endpoint
+      id: endpoint
+      run: |
+        TEMPLATE_ID="${{ steps.template.outputs.template_id }}"
+        ENDPOINT_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}"
+        GPU_TYPE="${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}"
+        
+        echo "Creating endpoint: $ENDPOINT_NAME"
+        echo "Template: $TEMPLATE_ID"
+        echo "GPU: $GPU_TYPE"
+        
+        # Check if endpoint exists
+        EXISTING_ENDPOINT=$(curl -s -X POST "https://api.runpod.io/graphql" \
+          -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d '{"query":"{ myself { endpoints { id name } } }"}' | \
+          jq -r ".data.myself.endpoints[] | select(.name==\"$ENDPOINT_NAME\") | .id")
+        
+        if [ -n "$EXISTING_ENDPOINT" ] && [ "$EXISTING_ENDPOINT" != "null" ]; then
+          echo "🔄 Endpoint exists: $EXISTING_ENDPOINT"
+          echo "Endpoint already exists - template updated, workers will use new image on next scale-up"
+          ENDPOINT_ID="$EXISTING_ENDPOINT"
+        else
+          echo "📡 Creating new endpoint..."
+          
+          ENDPOINT_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @- << EOF
+          {
+            "query": "mutation { saveEndpoint(input: { name: \"$ENDPOINT_NAME\", templateId: \"$TEMPLATE_ID\", gpuIds: \"$GPU_TYPE\", workersMin: 0, workersMax: 2, idleTimeout: 5, scalerType: \"QUEUE_DELAY\", scalerValue: 4 }) { id name } }"
+          }
+          EOF
+          )
+          
+          echo "Endpoint response: $ENDPOINT_RESPONSE"
+          
+          ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.data.saveEndpoint.id')
+          
+          if [ "$ENDPOINT_ID" = "null" ]; then
+            echo "❌ Endpoint creation failed"
+            echo "$ENDPOINT_RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Endpoint created: $ENDPOINT_ID"
+        fi
+        
+        echo "endpoint_id=$ENDPOINT_ID" >> $GITHUB_OUTPUT
+        echo "endpoint_name=$ENDPOINT_NAME" >> $GITHUB_OUTPUT
+    
+    - name: Wait for endpoint initialization
+      run: |
+        echo "⏳ Waiting for endpoint to initialize (30 seconds)..."
+        sleep 30
+    
+    - name: Test endpoint
+      id: test
+      continue-on-error: true
+      run: |
+        ENDPOINT_ID="${{ steps.endpoint.outputs.endpoint_id }}"
+        
+        echo "🧪 Testing endpoint: $ENDPOINT_ID"
+        
+        # Test the endpoint
+        TEST_RESPONSE=$(curl -s -X POST "https://api.runpod.ai/v2/$ENDPOINT_ID/runsync" \
+          -H "Content-Type: application/json" \
+          -d '{"input": {"test": "nvidia-smi"}}' \
+          --connect-timeout 30 --max-time 120)
+        
+        echo "Test response: $TEST_RESPONSE"
+        
+        # Check if test was successful
+        if echo "$TEST_RESPONSE" | jq -e '.output.status == "success"' > /dev/null 2>&1; then
+          echo "✅ Endpoint test successful!"
+          echo "test_status=success" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Endpoint test may have issues"
+          echo "test_status=warning" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Generate deployment summary
+      run: |
+        ENDPOINT_ID="${{ steps.endpoint.outputs.endpoint_id }}"
+        ENDPOINT_NAME="${{ steps.endpoint.outputs.endpoint_name }}"
+        TEMPLATE_NAME="${{ steps.template.outputs.template_name }}"
+        IMAGE_URL="${{ steps.build.outputs.image_url }}"
+        TEST_STATUS="${{ steps.test.outputs.test_status }}"
+        
+        echo "## 🚀 RunPod Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Endpoint ID**: \`$ENDPOINT_ID\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Endpoint Name**: \`$ENDPOINT_NAME\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Template**: \`$TEMPLATE_NAME\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Docker Image**: \`$IMAGE_URL\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: \`${{ github.event.inputs.environment || 'production' }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Status**: \`$TEST_STATUS\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🧪 Test Your Endpoint" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "# Test nvidia-smi endpoint" >> $GITHUB_STEP_SUMMARY
+        echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+        echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
+        echo "  -d '{\"input\": {\"test\": \"nvidia-smi\"}}'" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 RunPod Dashboard" >> $GITHUB_STEP_SUMMARY
+        echo "- [Endpoint Dashboard](https://www.runpod.io/console/serverless/$ENDPOINT_ID)" >> $GITHUB_STEP_SUMMARY
+        echo "- [All Serverless Endpoints](https://www.runpod.io/console/serverless)" >> $GITHUB_STEP_SUMMARY
