@@ -133,7 +133,7 @@ jobs:
           echo "📡 Creating new endpoint..."
           
           # Create template with unique name (using commit SHA)
-          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo '${IMAGE_URL}' | cut -d':' -f2 | head -c 8)"
+          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo "${IMAGE_URL}" | cut -d':' -f2 | head -c 8)"
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
@@ -167,7 +167,7 @@ jobs:
         else
           echo "🔄 Found existing endpoint: ${ENDPOINT_ID}"
           # Create new template with updated image (unique name)
-          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo '${IMAGE_URL}' | cut -d':' -f2 | head -c 8)"
+          TEMPLATE_NAME="${ENDPOINT_NAME}-template-$(echo "${IMAGE_URL}" | cut -d':' -f2 | head -c 8)"
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \

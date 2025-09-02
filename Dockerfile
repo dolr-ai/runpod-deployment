@@ -6,11 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the main application
-COPY main.py .
-
-# Expose port 80 (RunPod Load Balancing default)
-EXPOSE 80
+# Copy the handler
+COPY handler.py .
 
 # Start the RunPod serverless handler
-CMD ["python", "-u", "main.py"]
+CMD ["python", "-u", "handler.py"]
