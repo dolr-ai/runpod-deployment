@@ -94,32 +94,46 @@ jobs:
         echo "✅ DUMMY_SECRET is configured"
         
         # Create template using GraphQL with registry credentials and secrets
-        TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+        echo "🔄 Making GraphQL request to create template..."
+        
+        TEMPLATE_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "https://api.runpod.io/graphql" \
           -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
           -H "Content-Type: application/json" \
           -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"$TEMPLATE_NAME\\\", imageName: \\\"$IMAGE_URL\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"DUMMY_SECRET\\\", value: \\\"${{ secrets.DUMMY_SECRET }}\\\"}], containerRegistryAuthId: \\\"cmf2s9lsv0001jl0267lkqfxq\\\" }) { id name } }\"}")
         
-        echo "Raw template response: $TEMPLATE_RESPONSE"
+        # Extract HTTP code from response
+        HTTP_CODE=$(echo "$TEMPLATE_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+        TEMPLATE_BODY=$(echo "$TEMPLATE_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+        
+        echo "HTTP Status Code: $HTTP_CODE"
+        echo "Raw template response: $TEMPLATE_BODY"
+        
+        # Check HTTP status code
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "❌ HTTP request failed with status code: $HTTP_CODE"
+          echo "Response body: $TEMPLATE_BODY"
+          exit 1
+        fi
         
         # Check for GraphQL errors first
-        if echo "$TEMPLATE_RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
+        if echo "$TEMPLATE_BODY" | jq -e '.errors' > /dev/null 2>&1; then
           echo "❌ GraphQL errors found:"
-          echo "$TEMPLATE_RESPONSE" | jq '.errors'
+          echo "$TEMPLATE_BODY" | jq '.errors'
           exit 1
         fi
         
         # Check if response is empty or null
-        if [ -z "$TEMPLATE_RESPONSE" ] || [ "$TEMPLATE_RESPONSE" = "null" ]; then
+        if [ -z "$TEMPLATE_BODY" ] || [ "$TEMPLATE_BODY" = "null" ]; then
           echo "❌ Empty or null template response"
           exit 1
         fi
         
         # Extract template ID with better error handling
-        TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id // empty')
+        TEMPLATE_ID=$(echo "$TEMPLATE_BODY" | jq -r '.data.saveTemplate.id // empty')
         
         if [ -z "$TEMPLATE_ID" ] || [ "$TEMPLATE_ID" = "null" ]; then
           echo "❌ Template creation failed - no template ID returned"
-          echo "Full response: $TEMPLATE_RESPONSE"
+          echo "Full response: $TEMPLATE_BODY"
           exit 1
         fi
         
