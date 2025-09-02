@@ -144,11 +144,11 @@ jobs:
           if [ "$TEMPLATE_ID" != "null" ] && [ -n "$TEMPLATE_ID" ]; then
             echo "✅ Template created with ID: ${TEMPLATE_ID}"
             
-            # Create endpoint with template
+            # Create endpoint with template (reduced workers to fit quota)
             ENDPOINT_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"query\":\"mutation { saveEndpoint(input: { name: \\\"${ENDPOINT_NAME}\\\", templateId: \\\"${TEMPLATE_ID}\\\", gpuIds: \\\"${{ github.event.inputs.gpu_type || 'NVIDIA A40' }}\\\", workersMin: 0, workersMax: 3, idleTimeout: 5, scalerType: \\\"QUEUE_DELAY\\\", scalerValue: 4 }) { id name } }\"}")
+              -d "{\"query\":\"mutation { saveEndpoint(input: { name: \\\"${ENDPOINT_NAME}\\\", templateId: \\\"${TEMPLATE_ID}\\\", gpuIds: \\\"${{ github.event.inputs.gpu_type || 'NVIDIA A40' }}\\\", workersMin: 0, workersMax: 2, idleTimeout: 5, scalerType: \\\"QUEUE_DELAY\\\", scalerValue: 4 }) { id name } }\"}")
             
             echo "Endpoint Response: $ENDPOINT_RESPONSE"
             ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.data.saveEndpoint.id')
