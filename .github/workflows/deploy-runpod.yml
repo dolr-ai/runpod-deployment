@@ -84,7 +84,8 @@ jobs:
         echo "Image: $IMAGE_URL"
         
         # Validate DUMMY_SECRET is set
-        if [ -z "${{ secrets.DUMMY_SECRET }}" ]; then
+        DUMMY_SECRET="${{ secrets.DUMMY_SECRET }}"
+        if [ -z "$DUMMY_SECRET" ]; then
           echo "❌ DUMMY_SECRET is not set in GitHub secrets"
           exit 1
         fi
