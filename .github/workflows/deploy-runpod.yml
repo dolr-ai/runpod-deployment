@@ -85,6 +85,24 @@ jobs:
         pip install requests
         echo "✅ Dependencies installed"
     
+    - name: Verify RunPod API
+      run: |
+        echo "🔑 Verifying RunPod API key..."
+        API_TEST=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+          https://api.runpod.io/graphql \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"query":"{ myself { id email } }"}')
+        
+        echo "API Test Response: $API_TEST"
+        
+        if echo "$API_TEST" | jq -e '.data.myself.id' > /dev/null 2>&1; then
+          echo "✅ RunPod API key is valid"
+        else
+          echo "❌ RunPod API key is invalid or expired"
+          exit 1
+        fi
+    
     - name: Deploy to RunPod Serverless
       id: deploy
       run: |
@@ -95,13 +113,23 @@ jobs:
         echo "   Endpoint: ${ENDPOINT_NAME}"
         echo "   Image: ${IMAGE_URL}"
         
-        # Check if endpoint exists
-        ENDPOINT_ID=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+        # Check if endpoint exists (with better error handling)
+        echo "🔍 Checking for existing endpoints..."
+        ENDPOINTS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
           https://api.runpod.io/graphql \
           -X POST \
           -H "Content-Type: application/json" \
-          -d "{\"query\":\"{ serverlessEndpoints { id name } }\"}" | \
-          jq -r ".data.serverlessEndpoints[] | select(.name==\"${ENDPOINT_NAME}\") | .id")
+          -d '{"query":"{ serverlessEndpoints { id name } }"}')
+        
+        echo "API Response: $ENDPOINTS_RESPONSE"
+        
+        # Check if response has data
+        if echo "$ENDPOINTS_RESPONSE" | jq -e '.data.serverlessEndpoints' > /dev/null 2>&1; then
+          ENDPOINT_ID=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".data.serverlessEndpoints[] | select(.name==\"${ENDPOINT_NAME}\") | .id")
+        else
+          echo "❌ Failed to get endpoints. API Response: $ENDPOINTS_RESPONSE"
+          ENDPOINT_ID=""
+        fi
         
         if [ -z "$ENDPOINT_ID" ]; then
           echo "Creating new endpoint..."
