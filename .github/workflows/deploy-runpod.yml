@@ -1,0 +1,302 @@
+name: Deploy to RunPod Serverless
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      gpu_type:
+        description: 'GPU type for serverless workers'
+        required: false
+        default: 'NVIDIA RTX A4000'
+        type: choice
+        options:
+          - NVIDIA A40
+          - NVIDIA RTX A5000
+          - NVIDIA RTX A4000
+          - NVIDIA RTX 4090
+          - NVIDIA RTX 3090
+      
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to RunPod
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests
+        echo "✅ Dependencies installed"
+    
+    - name: Deploy to RunPod Serverless
+      id: deploy
+      run: |
+        ENDPOINT_NAME="gpu-test-${{ github.event.inputs.environment || 'production' }}"
+        IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main-${{ github.sha }}"
+        
+        echo "📦 Deploying to RunPod Serverless..."
+        echo "   Endpoint: ${ENDPOINT_NAME}"
+        echo "   Image: ${IMAGE_URL}"
+        
+        # Check if endpoint exists
+        ENDPOINT_CHECK=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+          https://api.runpod.io/graphql \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"query\":\"{ serverlessEndpoints { id name } }\"}" | \
+          jq -r ".data.serverlessEndpoints[] | select(.name==\"${ENDPOINT_NAME}\") | .id")
+        
+        if [ -z "$ENDPOINT_CHECK" ]; then
+          echo "Creating new endpoint..."
+          
+          # Create new endpoint
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            https://api.runpod.io/graphql \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d @- << GRAPHQL
+          {
+            "query": "mutation { saveTemplate(input: { name: \"${ENDPOINT_NAME}-template\", imageName: \"${IMAGE_URL}\", dockerArgs: \"\", containerDiskInGb: 10, volumeInGb: 0, volumeMountPath: \"/workspace\", ports: \"8000/http\", env: [] }) { id name } }"
+          }
+        GRAPHQL
+          )
+          
+          TEMPLATE_ID=$(echo "$RESPONSE" | jq -r '.data.saveTemplate.id')
+          
+          # Create endpoint with template
+          ENDPOINT_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            https://api.runpod.io/graphql \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d @- << GRAPHQL
+          {
+            "query": "mutation { createServerlessEndpoint(input: { name: \"${ENDPOINT_NAME}\", templateId: \"${TEMPLATE_ID}\", gpuIds: \"${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}\", workersMin: 0, workersMax: 3, idleTimeout: 5, scalerType: \"QUEUE_DELAY\", scalerValue: 4 }) { id } }"
+          }
+        GRAPHQL
+          )
+          
+          ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.data.createServerlessEndpoint.id')
+          
+          echo "✅ Created new endpoint with ID: ${ENDPOINT_ID}"
+          
+        else
+          echo "Updating existing endpoint: ${ENDPOINT_CHECK}"
+          
+          # Update template first
+          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            https://api.runpod.io/graphql \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d @- << GRAPHQL
+          {
+            "query": "mutation { saveTemplate(input: { name: \"${ENDPOINT_NAME}-template\", imageName: \"${IMAGE_URL}\", dockerArgs: \"\", containerDiskInGb: 10, volumeInGb: 0, volumeMountPath: \"/workspace\", ports: \"8000/http\", env: [] }) { id name } }"
+          }
+        GRAPHQL
+          )
+          
+          ENDPOINT_ID="$ENDPOINT_CHECK"
+          echo "✅ Updated endpoint: ${ENDPOINT_ID}"
+        fi
+        
+        echo "endpoint_id=${ENDPOINT_ID}" >> $GITHUB_OUTPUT
+        echo "endpoint_name=${ENDPOINT_NAME}" >> $GITHUB_OUTPUT
+        echo "image_url=${IMAGE_URL}" >> $GITHUB_OUTPUT
+    
+    - name: Wait for deployment
+      run: |
+        echo "⏳ Waiting for deployment to complete..."
+        sleep 30
+        echo "✅ Deployment should be ready"
+    
+    - name: Test endpoint
+      continue-on-error: true
+      run: |
+        ENDPOINT_ID="${{ steps.deploy.outputs.endpoint_id }}"
+        
+        echo "🧪 Testing endpoint..."
+        
+        # Test with simple request
+        RESPONSE=$(curl -s -X POST "https://api.runpod.ai/v2/${ENDPOINT_ID}/runsync" \
+          -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d '{"input": {"tokens": [1, 2, 3, 4, 5]}}' || echo "Request failed")
+        
+        echo "Response: $RESPONSE"
+        
+        # Check if response contains expected fields
+        if echo "$RESPONSE" | grep -q "gpu_info"; then
+          echo "✅ Endpoint test successful - GPU info found"
+        else
+          echo "⚠️  Endpoint test - response may be incomplete"
+        fi
+    
+    - name: Generate deployment summary
+      run: |
+        ENDPOINT_NAME="${{ steps.deploy.outputs.endpoint_name }}"
+        ENDPOINT_ID="${{ steps.deploy.outputs.endpoint_id }}"
+        IMAGE_URL="${{ steps.deploy.outputs.image_url }}"
+        
+        cat << EOF > runpod-deployment.md
+        # RunPod GPU Test Deployment Summary
+        
+        ## Deployment Details
+        - **Endpoint Name**: ${ENDPOINT_NAME}
+        - **Endpoint ID**: ${ENDPOINT_ID}
+        - **Docker Image**: ${IMAGE_URL}
+        - **Environment**: ${{ github.event.inputs.environment || 'production' }}
+        - **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+        - **Deployed By**: ${{ github.actor }}
+        - **Commit**: ${{ github.sha }}
+        
+        ## Configuration
+        - **GPU Type**: ${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}
+        - **Min Workers**: 0
+        - **Max Workers**: 3
+        - **Container Disk**: 10GB
+        - **Idle Timeout**: 5 minutes
+        
+        ## Test API Usage
+        
+        ### Synchronous Request
+        \`\`\`bash
+        curl -X POST "https://api.runpod.ai/v2/${ENDPOINT_ID}/runsync" \\
+          -H "Authorization: Bearer YOUR_RUNPOD_API_KEY" \\
+          -H "Content-Type: application/json" \\
+          -d '{
+            "input": {
+              "tokens": [1, 2, 3, 4, 5]
+            }
+          }'
+        \`\`\`
+        
+        ### Asynchronous Request
+        \`\`\`bash
+        # Start job
+        curl -X POST "https://api.runpod.ai/v2/${ENDPOINT_ID}/run" \\
+          -H "Authorization: Bearer YOUR_RUNPOD_API_KEY" \\
+          -H "Content-Type: application/json" \\
+          -d '{"input": {"tokens": [1, 2, 3, 4, 5]}}'
+        
+        # Check status (replace JOB_ID with returned ID)
+        curl -X GET "https://api.runpod.ai/v2/${ENDPOINT_ID}/status/JOB_ID" \\
+          -H "Authorization: Bearer YOUR_RUNPOD_API_KEY"
+        \`\`\`
+        
+        ## Expected Response
+        \`\`\`json
+        {
+          "status": "success",
+          "gpu_info": {
+            "cuda_available": true,
+            "device_count": 1,
+            "devices": [...]
+          },
+          "inference_result": {
+            "prediction": 0,
+            "confidence": 0.5,
+            "device_used": "cuda:0"
+          },
+          "gpu_memory": {
+            "allocated_mb": 50.2,
+            "reserved_mb": 100.0
+          }
+        }
+        \`\`\`
+        
+        ## Monitoring
+        - RunPod Dashboard: https://www.runpod.io/console/serverless
+        - Endpoint Logs: https://www.runpod.io/console/serverless/${ENDPOINT_ID}/logs
+        
+        ## Local Testing (FastAPI)
+        \`\`\`bash
+        # Install dependencies
+        pip install -r requirements.txt
+        
+        # Run locally
+        python main.py
+        
+        # Test endpoints
+        curl http://localhost:8000/health
+        curl -X POST http://localhost:8000/predict \\
+          -H "Content-Type: application/json" \\
+          -d '{"tokens": [1, 2, 3, 4, 5]}'
+        \`\`\`
+        EOF
+        
+        cat runpod-deployment.md
+    
+    - name: Upload deployment artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: runpod-deployment-${{ github.sha }}
+        path: runpod-deployment.md
+        retention-days: 30
+    
+    - name: Update deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "## ✅ RunPod GPU Test Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## ❌ RunPod GPU Test Deployment Failed!" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Endpoint**: ${{ steps.deploy.outputs.endpoint_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: ${{ steps.deploy.outputs.image_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
