@@ -83,11 +83,11 @@ jobs:
         echo "Creating template: $TEMPLATE_NAME"
         echo "Image: $IMAGE_URL"
         
-        # Create template using GraphQL
+        # Create template using GraphQL with registry credentials
         TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
           -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
           -H "Content-Type: application/json" \
-          -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"$TEMPLATE_NAME\\\", imageName: \\\"$IMAGE_URL\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}] }) { id name } }\"}")
+          -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"$TEMPLATE_NAME\\\", imageName: \\\"$IMAGE_URL\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}], containerRegistryAuthId: \\\"cmf2s9lsv0001jl0267lkqfxq\\\" }) { id name } }\"}")
         
         echo "Template response: $TEMPLATE_RESPONSE"
         
