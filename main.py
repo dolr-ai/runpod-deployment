@@ -137,11 +137,15 @@ async def health_check():
         "device_count": gpu_info["device_count"]
     }
 
+@app.get("/ping")
+async def ping():
+    """Required endpoint for RunPod Load Balancing health checks"""
+    # Return 200 for healthy, 204 for initializing
+    return {"status": "healthy"}
+
 if __name__ == "__main__":
-    # Check if running in RunPod environment
-    if os.getenv("RUNPOD_ENDPOINT_ID"):
-        print("Starting RunPod serverless handler...")
-        runpod.serverless.start({"handler": handler})
-    else:
-        print("Starting FastAPI server for local testing...")
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+    # For RunPod Load Balancing endpoints, we run FastAPI directly
+    # Use PORT environment variable (RunPod standard)
+    port = int(os.getenv("PORT", "8000"))
+    print(f"Starting FastAPI server on port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port)
