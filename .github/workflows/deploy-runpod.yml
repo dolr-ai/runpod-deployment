@@ -83,19 +83,41 @@ jobs:
         echo "Creating template: $TEMPLATE_NAME"
         echo "Image: $IMAGE_URL"
         
+        # Validate DUMMY_SECRET is set
+        if [ -z "${{ secrets.DUMMY_SECRET }}" ]; then
+          echo "❌ DUMMY_SECRET is not set in GitHub secrets"
+          exit 1
+        fi
+        
+        echo "✅ DUMMY_SECRET is set: ${DUMMY_SECRET:0:3}***"
+        
         # Create template using GraphQL with registry credentials and secrets
         TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
           -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
           -H "Content-Type: application/json" \
           -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"$TEMPLATE_NAME\\\", imageName: \\\"$IMAGE_URL\\\", dockerArgs: \\\"\\\", containerDiskInGb: 10, volumeInGb: 0, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"DUMMY_SECRET\\\", value: \\\"${{ secrets.DUMMY_SECRET }}\\\"}], containerRegistryAuthId: \\\"cmf2s9lsv0001jl0267lkqfxq\\\" }) { id name } }\"}")
         
-        echo "Template response: $TEMPLATE_RESPONSE"
+        echo "Raw template response: $TEMPLATE_RESPONSE"
         
-        TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id')
+        # Check for GraphQL errors first
+        if echo "$TEMPLATE_RESPONSE" | jq -e '.errors' > /dev/null 2>&1; then
+          echo "❌ GraphQL errors found:"
+          echo "$TEMPLATE_RESPONSE" | jq '.errors'
+          exit 1
+        fi
         
-        if [ "$TEMPLATE_ID" = "null" ]; then
-          echo "❌ Template creation failed"
-          echo "$TEMPLATE_RESPONSE"
+        # Check if response is empty or null
+        if [ -z "$TEMPLATE_RESPONSE" ] || [ "$TEMPLATE_RESPONSE" = "null" ]; then
+          echo "❌ Empty or null template response"
+          exit 1
+        fi
+        
+        # Extract template ID with better error handling
+        TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id // empty')
+        
+        if [ -z "$TEMPLATE_ID" ] || [ "$TEMPLATE_ID" = "null" ]; then
+          echo "❌ Template creation failed - no template ID returned"
+          echo "Full response: $TEMPLATE_RESPONSE"
           exit 1
         fi
         
