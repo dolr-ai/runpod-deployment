@@ -113,93 +113,69 @@ jobs:
         echo "   Endpoint: ${ENDPOINT_NAME}"
         echo "   Image: ${IMAGE_URL}"
         
-        # Check if endpoint exists (with better error handling)
+        # Check if endpoint exists first (using correct GraphQL query)
         echo "🔍 Checking for existing endpoints..."
-        ENDPOINTS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-          https://api.runpod.io/graphql \
-          -X POST \
+        ENDPOINTS_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+          -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
           -H "Content-Type: application/json" \
-          -d '{"query":"{ serverlessEndpoints { id name } }"}')
+          -d '{"query":"{ myself { endpoints { id name } } }"}')
         
-        echo "API Response: $ENDPOINTS_RESPONSE"
+        echo "Endpoints Response: $ENDPOINTS_RESPONSE"
         
-        # Check if response has data
-        if echo "$ENDPOINTS_RESPONSE" | jq -e '.data.serverlessEndpoints' > /dev/null 2>&1; then
-          ENDPOINT_ID=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".data.serverlessEndpoints[] | select(.name==\"${ENDPOINT_NAME}\") | .id")
+        # Check if endpoint exists
+        if echo "$ENDPOINTS_RESPONSE" | jq -e '.data.myself.endpoints' > /dev/null 2>&1; then
+          ENDPOINT_ID=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".data.myself.endpoints[] | select(.name==\"${ENDPOINT_NAME}\") | .id")
         else
-          echo "❌ Failed to get endpoints. API Response: $ENDPOINTS_RESPONSE"
           ENDPOINT_ID=""
         fi
         
         if [ -z "$ENDPOINT_ID" ]; then
-          echo "Creating new endpoint..."
+          echo "📡 Creating new endpoint..."
           
-          # Create new endpoint using GraphQL API
-          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-            https://api.runpod.io/graphql \
-            -X POST \
+          # Create template first
+          TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @- << GRAPHQL
-          {
-            "query": "mutation CreateServerlessEndpoint(\$input: ServerlessEndpointInput!) { createServerlessEndpoint(input: \$input) { id name apiKey } }",
-            "variables": {
-              "input": {
-                "name": "${ENDPOINT_NAME}",
-                "dockerImage": "${IMAGE_URL}",
-                "gpuType": "${{ github.event.inputs.gpu_type || 'NVIDIA A40' }}",
-                "minWorkers": 0,
-                "maxWorkers": 3,
-                "defaultWorkers": 0,
-                "scalerType": "QUEUE_DELAY",
-                "scalerValue": 30,
-                "workerTimeout": 300,
-                "containerDiskSize": 10,
-                "env": {
-                  "CUDA_VISIBLE_DEVICES": "0",
-                  "PYTHONUNBUFFERED": "1"
-                }
-              }
-            }
-          }
-        GRAPHQL
-          )
+            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${ENDPOINT_NAME}-template\\\", imageName: \\\"${IMAGE_URL}\\\", containerDiskInGb: 10, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
           
-          ENDPOINT_ID=$(echo "$RESPONSE" | jq -r '.data.createServerlessEndpoint.id')
-          API_KEY=$(echo "$RESPONSE" | jq -r '.data.createServerlessEndpoint.apiKey')
+          echo "Template Response: $TEMPLATE_RESPONSE"
+          TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.data.saveTemplate.id')
           
-          echo "✅ Created new endpoint with ID: ${ENDPOINT_ID}"
-          echo "endpoint_id=${ENDPOINT_ID}" >> $GITHUB_OUTPUT
-          echo "api_key=${API_KEY}" >> $GITHUB_OUTPUT
-          
+          if [ "$TEMPLATE_ID" != "null" ] && [ -n "$TEMPLATE_ID" ]; then
+            echo "✅ Template created with ID: ${TEMPLATE_ID}"
+            
+            # Create endpoint with template
+            ENDPOINT_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\":\"mutation { saveEndpoint(input: { name: \\\"${ENDPOINT_NAME}\\\", templateId: \\\"${TEMPLATE_ID}\\\", gpuIds: \\\"${{ github.event.inputs.gpu_type || 'NVIDIA A40' }}\\\", workersMin: 0, workersMax: 3, idleTimeout: 5, scalerType: \\\"QUEUE_DELAY\\\", scalerValue: 4 }) { id name } }\"}")
+            
+            echo "Endpoint Response: $ENDPOINT_RESPONSE"
+            ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.data.saveEndpoint.id')
+            
+            if [ "$ENDPOINT_ID" != "null" ] && [ -n "$ENDPOINT_ID" ]; then
+              echo "✅ Endpoint created with ID: ${ENDPOINT_ID}"
+            else
+              echo "❌ Failed to create endpoint. Response: $ENDPOINT_RESPONSE"
+              exit 1
+            fi
+          else
+            echo "❌ Failed to create template. Response: $TEMPLATE_RESPONSE"
+            exit 1
+          fi
         else
-          echo "Updating existing endpoint: ${ENDPOINT_ID}"
-          
-          # Update existing endpoint
-          RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-            https://api.runpod.io/graphql \
-            -X POST \
+          echo "🔄 Found existing endpoint: ${ENDPOINT_ID}"
+          # Update template with new image
+          TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
+            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @- << GRAPHQL
-          {
-            "query": "mutation UpdateServerlessEndpoint(\$id: String!, \$input: ServerlessEndpointUpdateInput!) { updateServerlessEndpoint(id: \$id, input: \$input) { id name } }",
-            "variables": {
-              "id": "${ENDPOINT_ID}",
-              "input": {
-                "dockerImage": "${IMAGE_URL}",
-                "minWorkers": 0,
-                "maxWorkers": 3,
-                "env": {
-                  "CUDA_VISIBLE_DEVICES": "0",
-                  "PYTHONUNBUFFERED": "1"
-                }
-              }
-            }
-          }
-        GRAPHQL
-          )
-          
-          echo "✅ Updated endpoint: ${ENDPOINT_ID}"
-          echo "endpoint_id=${ENDPOINT_ID}" >> $GITHUB_OUTPUT
+            -d "{\"query\":\"mutation { saveTemplate(input: { name: \\\"${ENDPOINT_NAME}-template\\\", imageName: \\\"${IMAGE_URL}\\\", containerDiskInGb: 10, env: [{key: \\\"CUDA_VISIBLE_DEVICES\\\", value: \\\"0\\\"}, {key: \\\"PYTHONUNBUFFERED\\\", value: \\\"1\\\"}] }) { id name } }\"}")
+          echo "✅ Updated template for existing endpoint"
+        fi
+        
+        if [ "$ENDPOINT_ID" = "null" ] || [ -z "$ENDPOINT_ID" ]; then
+          echo "❌ Failed to create endpoint"
+          exit 1
         fi
         
         echo "endpoint_id=${ENDPOINT_ID}" >> $GITHUB_OUTPUT
