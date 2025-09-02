@@ -83,14 +83,15 @@ jobs:
         echo "Creating template: $TEMPLATE_NAME"
         echo "Image: $IMAGE_URL"
         
-        # Validate DUMMY_SECRET is set
-        DUMMY_SECRET="${{ secrets.DUMMY_SECRET }}"
-        if [ -z "$DUMMY_SECRET" ]; then
+        # Validate DUMMY_SECRET is set (safer approach)
+        echo "Checking DUMMY_SECRET availability..."
+        DUMMY_SECRET_SET="${{ secrets.DUMMY_SECRET != '' }}"
+        if [ "$DUMMY_SECRET_SET" != "true" ]; then
           echo "❌ DUMMY_SECRET is not set in GitHub secrets"
           exit 1
         fi
         
-        echo "✅ DUMMY_SECRET is set: ${DUMMY_SECRET:0:3}***"
+        echo "✅ DUMMY_SECRET is configured"
         
         # Create template using GraphQL with registry credentials and secrets
         TEMPLATE_RESPONSE=$(curl -s -X POST "https://api.runpod.io/graphql" \
