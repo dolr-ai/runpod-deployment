@@ -182,6 +182,9 @@ jobs:
           EXISTING_TEMPLATE=$(echo "$TEMPLATES_RESPONSE" | jq -r ".[] | select(.name==\"$TEMPLATE_NAME\") | .id")
 
           # Create template using REST API with configurable storage sizes
+          # Compact and validate GCP credentials JSON first
+          GCP_CREDS_COMPACT=$(echo '${{ secrets.GCP_CREDENTIALS }}' | jq -c .)
+          
           # Create JSON payload using jq to properly escape all values
           TEMPLATE_PAYLOAD=$(jq -n \
             --arg name "$TEMPLATE_NAME" \
@@ -190,7 +193,7 @@ jobs:
             --argjson volumeSize "$LOCAL_VOLUME_SIZE" \
             --arg volumePath "/workspace" \
             --arg registryAuth "cmf2s9lsv0001jl0267lkqfxq" \
-            --arg gcpCreds "${{ secrets.GCP_CREDENTIALS }}" \
+            --arg gcpCreds "$GCP_CREDS_COMPACT" \
             --arg runpodKey "${{ secrets.RUNPOD_API_KEY }}" \
             '{
               name: $name,
