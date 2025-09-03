@@ -25,6 +25,22 @@ on:
           - NVIDIA RTX A4000
           - NVIDIA RTX 4090
           - NVIDIA RTX 3090
+      datacenter:
+        description: "RunPod datacenter"
+        required: false
+        default: "US-KS-2"
+        type: choice
+        options:
+          - US-KS-2
+          - US-GA-1
+          - US-GA-2
+          - CA-MTL-3
+          - EU-RO-1
+          - EU-CZ-1
+          - EU-FR-1
+          - EU-NL-1
+          - EU-SE-1
+          - EUR-IS-2
 
 env:
   GAR_LOCATION: us-central1
@@ -74,20 +90,83 @@ jobs:
         run: |
           pip install requests
 
+      - name: Create or Find Network Volume
+        id: volume
+        run: |
+          VOLUME_NAME="model-storage-${{ github.event.inputs.environment || 'prod' }}"
+          DATACENTER_ID="${{ github.event.inputs.datacenter || 'US-KS-2' }}"
+          VOLUME_SIZE=100  # Network volume size in GB
+          LOCAL_VOLUME_SIZE=100  # Local volume size in GB  
+          CONTAINER_DISK_SIZE=20  # Container disk size in GB
+          
+          echo "Looking for existing volume: $VOLUME_NAME"
+          
+          # Check if volume exists
+          VOLUMES_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/networkvolumes" \
+            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            -H "Content-Type: application/json")
+          
+          EXISTING_VOLUME=$(echo "$VOLUMES_RESPONSE" | jq -r ".[] | select(.name==\"$VOLUME_NAME\") | .id")
+          
+          if [ -n "$EXISTING_VOLUME" ] && [ "$EXISTING_VOLUME" != "null" ]; then
+            echo "🔄 Using existing volume: $EXISTING_VOLUME"
+            VOLUME_ID="$EXISTING_VOLUME"
+          else
+            echo "📦 Creating new network volume..."
+            
+            VOLUME_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/networkvolumes" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\":\"$VOLUME_NAME\",\"size\":$VOLUME_SIZE,\"dataCenterId\":\"$DATACENTER_ID\"}")
+            
+            echo "Volume response: $VOLUME_RESPONSE"
+            
+            # Check for errors
+            if echo "$VOLUME_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+              echo "❌ Volume creation failed:"
+              echo "$VOLUME_RESPONSE" | jq '.error'
+              exit 1
+            fi
+            
+            VOLUME_ID=$(echo "$VOLUME_RESPONSE" | jq -r '.id')
+            
+            if [ "$VOLUME_ID" = "null" ] || [ -z "$VOLUME_ID" ]; then
+              echo "❌ Volume creation failed - no volume ID returned"
+              echo "Full response: $VOLUME_RESPONSE"
+              exit 1
+            fi
+            
+            echo "✅ Volume created: $VOLUME_ID"
+          fi
+          
+          echo "volume_id=$VOLUME_ID" >> $GITHUB_OUTPUT
+          echo "volume_name=$VOLUME_NAME" >> $GITHUB_OUTPUT
+          echo "volume_size=$VOLUME_SIZE" >> $GITHUB_OUTPUT
+          echo "local_volume_size=$LOCAL_VOLUME_SIZE" >> $GITHUB_OUTPUT
+          echo "container_disk_size=$CONTAINER_DISK_SIZE" >> $GITHUB_OUTPUT
+          echo "datacenter=$DATACENTER_ID" >> $GITHUB_OUTPUT
+
       - name: Create or Update RunPod Template
         id: template
         run: |
           IMAGE_URL="${{ steps.build.outputs.image_url }}"
           TEMPLATE_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}-$(date +%s)"
+          VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
+          VOLUME_SIZE="${{ steps.volume.outputs.volume_size }}"
+          LOCAL_VOLUME_SIZE="${{ steps.volume.outputs.local_volume_size }}"
+          CONTAINER_DISK_SIZE="${{ steps.volume.outputs.container_disk_size }}"
 
           echo "Creating template: $TEMPLATE_NAME"
           echo "Image: $IMAGE_URL"
+          echo "Network Volume: $VOLUME_ID (${VOLUME_SIZE}GB)"
+          echo "Local Volume: ${LOCAL_VOLUME_SIZE}GB at /workspace"
+          echo "Container Disk: ${CONTAINER_DISK_SIZE}GB"
 
-          # Create template using REST API with registry credentials and 100GB volume
+          # Create template using REST API with configurable storage sizes
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"name\":\"$TEMPLATE_NAME\",\"imageName\":\"$IMAGE_URL\",\"dockerArgs\":\"\",\"containerDiskInGb\":10,\"volumeInGb\":100,\"env\":{\"CUDA_VISIBLE_DEVICES\":\"0\"},\"containerRegistryAuthId\":\"cmf2s9lsv0001jl0267lkqfxq\"}")
+            -d "{\"name\":\"$TEMPLATE_NAME\",\"imageName\":\"$IMAGE_URL\",\"containerDiskInGb\":$CONTAINER_DISK_SIZE,\"volumeInGb\":$LOCAL_VOLUME_SIZE,\"volumeMountPath\":\"/workspace\",\"networkVolumeId\":\"$VOLUME_ID\",\"env\":{\"CUDA_VISIBLE_DEVICES\":\"0\"},\"containerRegistryAuthId\":\"cmf2s9lsv0001jl0267lkqfxq\"}")
 
           echo "Raw template response: $TEMPLATE_RESPONSE"
 
@@ -200,6 +279,12 @@ jobs:
           TEMPLATE_NAME="${{ steps.template.outputs.template_name }}"
           IMAGE_URL="${{ steps.build.outputs.image_url }}"
           TEST_STATUS="${{ steps.test.outputs.test_status }}"
+          VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
+          VOLUME_NAME="${{ steps.volume.outputs.volume_name }}"
+          VOLUME_SIZE="${{ steps.volume.outputs.volume_size }}"
+          LOCAL_VOLUME_SIZE="${{ steps.volume.outputs.local_volume_size }}"
+          CONTAINER_DISK_SIZE="${{ steps.volume.outputs.container_disk_size }}"
+          DATACENTER="${{ steps.volume.outputs.datacenter }}"
 
           echo "## 🚀 RunPod Deployment Complete!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -209,7 +294,14 @@ jobs:
           echo "- **Template**: \`$TEMPLATE_NAME\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Docker Image**: \`$IMAGE_URL\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: \`${{ github.event.inputs.environment || 'production' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Datacenter**: \`$DATACENTER\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network Volume**: \`$VOLUME_NAME\` (\`$VOLUME_ID\`)" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Status**: \`$TEST_STATUS\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💾 Storage Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Disk**: ${CONTAINER_DISK_SIZE}GB (temporary)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Local Volume**: ${LOCAL_VOLUME_SIZE}GB at \`/workspace\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network Volume**: ${VOLUME_SIZE}GB persistent storage for models" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🧪 Test Your Endpoint" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
