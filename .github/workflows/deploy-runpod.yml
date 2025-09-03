@@ -41,6 +41,18 @@ on:
           - EU-NL-1
           - EU-SE-1
           - EUR-IS-2
+      execution_timeout:
+        description: "Execution timeout (seconds)"
+        required: false
+        default: "3600"
+        type: choice
+        options:
+          - "600"    # 10 minutes
+          - "1800"   # 30 minutes  
+          - "3600"   # 1 hour
+          - "7200"   # 2 hours
+          - "14400"  # 4 hours
+          - "86400"  # 24 hours
 
 env:
   GAR_LOCATION: us-central1
@@ -233,11 +245,13 @@ jobs:
           ENDPOINT_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}"
           GPU_TYPE="${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}"
           VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
+          EXECUTION_TIMEOUT="${{ github.event.inputs.execution_timeout || '3600' }}"
 
           echo "Creating endpoint: $ENDPOINT_NAME"
           echo "Template: $TEMPLATE_ID"
           echo "GPU: $GPU_TYPE"
           echo "Network Volume: $VOLUME_ID"
+          echo "Execution Timeout: ${EXECUTION_TIMEOUT}s"
 
           # Check if endpoint exists using REST API
           ENDPOINTS_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/endpoints" \
@@ -256,7 +270,7 @@ jobs:
             ENDPOINT_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
+              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"executionTimeout\":$EXECUTION_TIMEOUT,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
 
             echo "Endpoint response: $ENDPOINT_RESPONSE"
 
@@ -317,6 +331,7 @@ jobs:
           LOCAL_VOLUME_SIZE="${{ steps.volume.outputs.local_volume_size }}"
           CONTAINER_DISK_SIZE="${{ steps.volume.outputs.container_disk_size }}"
           DATACENTER="${{ steps.volume.outputs.datacenter }}"
+          EXECUTION_TIMEOUT="${{ github.event.inputs.execution_timeout || '3600' }}"
 
           echo "## 🚀 RunPod Deployment Complete!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -327,6 +342,7 @@ jobs:
           echo "- **Docker Image**: \`$IMAGE_URL\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Environment**: \`${{ github.event.inputs.environment || 'production' }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Datacenter**: \`$DATACENTER\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Execution Timeout**: \`${EXECUTION_TIMEOUT}s\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Network Volume**: \`$VOLUME_NAME\` (\`$VOLUME_ID\`)" >> $GITHUB_STEP_SUMMARY
           echo "- **Test Status**: \`$TEST_STATUS\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -347,11 +363,31 @@ jobs:
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"test\": \"nvidia-smi\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Download models from GCS bucket" >> $GITHUB_STEP_SUMMARY
+          echo "# Download models from GCS bucket (⏱️ Uses ${EXECUTION_TIMEOUT}s timeout)" >> $GITHUB_STEP_SUMMARY
           echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"action\": \"download_models\"}}'" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# List files in /workspace directory" >> $GITHUB_STEP_SUMMARY
+          echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/workspace\"}}'" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# List files in /runpod-volume directory (persistent models)" >> $GITHUB_STEP_SUMMARY
+          echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/runpod-volume\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚡ Quick Test Commands" >> $GITHUB_STEP_SUMMARY
+          echo "**1. Test GPU Access:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"test\": \"nvidia-smi\"}}'\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**2. Download All Models (⏱️ ${EXECUTION_TIMEOUT}s timeout):**" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"download_models\"}}'\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**3. List Downloaded Models:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/runpod-volume\"}}'\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 RunPod Dashboard" >> $GITHUB_STEP_SUMMARY
           echo "- [Endpoint Dashboard](https://www.runpod.io/console/serverless/$ENDPOINT_ID)" >> $GITHUB_STEP_SUMMARY

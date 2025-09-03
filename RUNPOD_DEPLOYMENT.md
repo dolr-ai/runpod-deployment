@@ -465,3 +465,61 @@ POST /v1/endpoints
 - Full parameterization and error handling
 
 **Final Result**: Production-ready RunPod serverless deployment with 100GB persistent storage! 🚀
+
+---
+
+## Attempt 6: Timeout Configuration for Long-Running Tasks
+**Date**: Sept 3, 2025  
+**Issue**: Model downloading from GCS will take significant time, but RunPod serverless has timeout limits
+
+### 🚨 **Timeout Problem Identified:**
+- **Default Execution Timeout**: 600 seconds (10 minutes)
+- **Model Download Reality**: 30+ minutes for large model collections
+- **Risk**: Downloads failing due to timeout, wasting compute and incomplete transfers
+
+### ✅ **Solution Implemented:**
+
+#### **1. Added Configurable Execution Timeout**
+```yaml
+# New workflow input
+execution_timeout:
+  description: "Execution timeout (seconds)"
+  default: "3600" 
+  options:
+    - "600"    # 10 minutes
+    - "1800"   # 30 minutes  
+    - "3600"   # 1 hour (default)
+    - "7200"   # 2 hours
+    - "14400"  # 4 hours
+    - "86400"  # 24 hours
+```
+
+#### **2. Updated Endpoint Creation**
+```json
+{
+  "executionTimeout": 3600,  // ✅ Added timeout parameter
+  "idleTimeout": 5,
+  "scalerType": "QUEUE_DELAY"
+}
+```
+
+#### **3. Enhanced Deployment Reporting**
+- Execution timeout shown in deployment logs
+- Timeout setting included in GitHub Actions summary
+- Clear visibility into current timeout limits
+
+### 🎯 **Timeout Strategy:**
+- **Default**: 1 hour (3600s) - handles most model downloads
+- **Conservative**: 30 minutes for smaller models  
+- **Large Models**: 2-4 hours for extensive collections
+- **Maximum**: 24 hours for massive datasets
+
+### 📊 **Expected Performance:**
+```
+Small Models (<1GB):     10-30 minutes
+Medium Models (1-5GB):   30-60 minutes  
+Large Collections (>5GB): 1-4 hours
+Massive Datasets (>20GB): 4+ hours
+```
+
+This ensures model downloads complete successfully without timeout failures! ⏱️

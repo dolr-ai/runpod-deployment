@@ -89,6 +89,58 @@ def download_models_from_gcs():
         }
 
 
+def list_workspace_files(path="/workspace"):
+    """
+    List files and directories in the specified path
+    """
+    try:
+        path_obj = Path(path)
+        
+        if not path_obj.exists():
+            return {
+                "status": "error",
+                "error": f"Path does not exist: {path}"
+            }
+        
+        files = []
+        directories = []
+        
+        # List all items in the directory
+        for item in path_obj.iterdir():
+            if item.is_file():
+                files.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "size": item.stat().st_size,
+                    "type": "file"
+                })
+            elif item.is_dir():
+                directories.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "type": "directory"
+                })
+        
+        # Sort for consistent output
+        files.sort(key=lambda x: x["name"])
+        directories.sort(key=lambda x: x["name"])
+        
+        return {
+            "status": "success",
+            "path": str(path_obj.absolute()),
+            "directories": directories,
+            "files": files,
+            "total_files": len(files),
+            "total_directories": len(directories)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to list files: {str(e)}"
+        }
+
+
 def handler(job):
     """
     RunPod serverless handler function
@@ -107,6 +159,11 @@ def handler(job):
         if job_input.get("action") == "download_models":
             print("Processing model download request...")
             return download_models_from_gcs()
+        
+        # Check if this is a file listing request
+        if job_input.get("action") == "list_files":
+            print("Processing file listing request...")
+            return list_workspace_files(job_input.get("path", "/workspace"))
         
         # Run nvidia-smi command to get GPU information
         print("Running nvidia-smi...")
