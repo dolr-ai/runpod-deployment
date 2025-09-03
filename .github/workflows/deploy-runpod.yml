@@ -163,10 +163,40 @@ jobs:
           echo "Container Disk: ${CONTAINER_DISK_SIZE}GB"
 
           # Create template using REST API with configurable storage sizes
+          # Properly escape GCP credentials JSON for template payload
+          GCS_BUCKET="${{ secrets.GCS_BUCKET || 'talking-head-models' }}"
+          
+          # Create JSON payload using jq to properly escape all values
+          TEMPLATE_PAYLOAD=$(jq -n \
+            --arg name "$TEMPLATE_NAME" \
+            --arg image "$IMAGE_URL" \
+            --argjson containerDisk "$CONTAINER_DISK_SIZE" \
+            --argjson volumeSize "$LOCAL_VOLUME_SIZE" \
+            --arg volumePath "/workspace" \
+            --arg gcpCreds '${{ secrets.GCP_CREDENTIALS }}' \
+            --arg gcsBucket "$GCS_BUCKET" \
+            --arg registryAuth "cmf2s9lsv0001jl0267lkqfxq" \
+            '{
+              name: $name,
+              imageName: $image,
+              containerDiskInGb: $containerDisk,
+              volumeInGb: $volumeSize,
+              volumeMountPath: $volumePath,
+              env: {
+                CUDA_VISIBLE_DEVICES: "0",
+                PYTHONUNBUFFERED: "1",
+                GCP_CREDENTIALS: $gcpCreds,
+                GCS_BUCKET: $gcsBucket
+              },
+              containerRegistryAuthId: $registryAuth
+            }')
+          
+          echo "Template payload (first 200 chars): $(echo "$TEMPLATE_PAYLOAD" | head -c 200)..."
+          
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"name\":\"$TEMPLATE_NAME\",\"imageName\":\"$IMAGE_URL\",\"containerDiskInGb\":$CONTAINER_DISK_SIZE,\"volumeInGb\":$LOCAL_VOLUME_SIZE,\"volumeMountPath\":\"/workspace\",\"env\":{\"CUDA_VISIBLE_DEVICES\":\"0\",\"PYTHONUNBUFFERED\":\"1\",\"GCP_CREDENTIALS\":\"${{ secrets.GCP_CREDENTIALS }}\",\"GCS_BUCKET\":\"${{ secrets.GCS_BUCKET || 'talking-head-models' }}\"},\"containerRegistryAuthId\":\"cmf2s9lsv0001jl0267lkqfxq\"}")
+            -d "$TEMPLATE_PAYLOAD")
 
           echo "Raw template response: $TEMPLATE_RESPONSE"
 
