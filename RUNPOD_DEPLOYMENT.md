@@ -235,4 +235,78 @@ curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
 
 ---
 
+## Attempt 4: GraphQL to REST API Migration (FAILED)
+**Date**: Sept 3, 2025  
+**Approach**: Migrating from GraphQL to REST API due to better documentation and modern API design
+
+### Problem Encountered
+When migrating from GraphQL to REST API, encountered schema validation error:
+
+```json
+[{"error":"At #/paths/templates/post for POST https://rest.runpod.io/v1/templates, The request body is defined as an object. However, it does not meet the schema requirements of the specification. Suggestion: Ensure that the object being submitted, matches the schema correctly","problems":["At /templates/properties/env/type: got array, want object"]}]
+```
+
+### What We Tried
+1. **Migration Approach**: Changed API endpoints
+   - Template creation: `https://api.runpod.io/graphql` → `https://rest.runpod.io/v1/templates`
+   - Endpoint creation: `https://api.runpod.io/graphql` → `https://rest.runpod.io/v1/endpoints`
+   - Endpoint listing: GraphQL query → `GET https://rest.runpod.io/v1/endpoints`
+
+2. **Request Format Used** (❌ INCORRECT):
+   ```json
+   {
+     "name": "$TEMPLATE_NAME",
+     "imageName": "$IMAGE_URL", 
+     "dockerArgs": "",
+     "containerDiskInGb": 10,
+     "volumeInGb": 100,
+     "env": [{"key": "CUDA_VISIBLE_DEVICES", "value": "0"}],  // ❌ WRONG: array format
+     "containerRegistryAuthId": "cmf2s9lsv0001jl0267lkqfxq"
+   }
+   ```
+
+### Root Cause
+The REST API expects `env` to be an **object**, not an array of key-value pairs:
+- ❌ GraphQL/Array format: `env: [{"key": "CUDA_VISIBLE_DEVICES", "value": "0"}]`
+- ✅ REST API/Object format: `env: {"CUDA_VISIBLE_DEVICES": "0"}`
+
+### Solution Required
+Update the workflow to use the correct REST API schema per official documentation:
+
+```json
+{
+  "name": "template-name",
+  "imageName": "image-url",
+  "env": {
+    "CUDA_VISIBLE_DEVICES": "0"  // Object format, not array
+  },
+  "containerDiskInGb": 10,
+  "volumeInGb": 100,
+  "containerRegistryAuthId": "auth-id"
+}
+```
+
+### Official REST API Reference
+Based on RunPod's documentation at `https://rest.runpod.io/v1/templates`:
+```bash
+curl --request POST \
+  --url https://rest.runpod.io/v1/templates \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "<string>",
+    "imageName": "<string>", 
+    "env": {
+      "ENV_VAR": "value"  // Object format required
+    },
+    "containerDiskInGb": 50,
+    "volumeInGb": 20
+  }'
+```
+
+### Status
+**NEEDS FIX**: Update workflow env format from array to object structure.
+
+---
+
 *This document will be updated as we progress through the deployment...*
