@@ -195,10 +195,10 @@ jobs:
               volumeInGb: $volumeSize,
               volumeMountPath: $volumePath,
               env: {
-                CUDA_VISIBLE_DEVICES: "0",
-                PYTHONUNBUFFERED: "1",
-                GCP_CREDENTIALS: $gcpCreds,
-                GCS_BUCKET: $gcsBucket
+                "CUDA_VISIBLE_DEVICES": "0",
+                "PYTHONUNBUFFERED": "1",
+                "GCP_CREDENTIALS": $gcpCreds,
+                "GCS_BUCKET": $gcsBucket
               },
               containerRegistryAuthId: $registryAuth
             }')
@@ -262,8 +262,24 @@ jobs:
           EXISTING_ENDPOINT=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".[] | select(.name==\"$ENDPOINT_NAME\") | .id")
 
           if [ -n "$EXISTING_ENDPOINT" ] && [ "$EXISTING_ENDPOINT" != "null" ]; then
-            echo "🔄 Endpoint exists: $EXISTING_ENDPOINT"
-            echo "Endpoint already exists - template updated, workers will use new image on next scale-up"
+            echo "🔄 Endpoint exists: $EXISTING_ENDPOINT, updating with new template..."
+            
+            # Update existing endpoint with new template
+            UPDATE_RESPONSE=$(curl -s -X PATCH "https://rest.runpod.io/v1/endpoints/$EXISTING_ENDPOINT" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"templateId\":\"$TEMPLATE_ID\",\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS}")
+            
+            echo "Update response: $UPDATE_RESPONSE"
+            
+            # Check if update was successful
+            if echo "$UPDATE_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+              echo "❌ Endpoint update failed"
+              echo "$UPDATE_RESPONSE"
+              exit 1
+            fi
+            
+            echo "✅ Endpoint updated with new template"
             ENDPOINT_ID="$EXISTING_ENDPOINT"
           else
             echo "📡 Creating new endpoint..."
