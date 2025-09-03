@@ -7,6 +7,86 @@ import runpod
 import subprocess
 import json
 import os
+import tempfile
+from google.cloud import storage
+from pathlib import Path
+
+
+def download_models_from_gcs():
+    """
+    Download all models from Google Cloud Storage bucket to /runpod-volume/models/
+    """
+    try:
+        # Get GCP credentials and bucket from environment
+        gcp_credentials = os.getenv("GCP_CREDENTIALS")
+        bucket_name = os.getenv("GCS_BUCKET", "talking-head-models")
+        
+        if not gcp_credentials:
+            return {
+                "status": "error",
+                "error": "GCP_CREDENTIALS environment variable not set"
+            }
+        
+        # Create models directory on persistent storage
+        models_dir = Path("/runpod-volume/models")
+        models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write GCP credentials to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(gcp_credentials)
+            credentials_path = f.name
+        
+        # Set GOOGLE_APPLICATION_CREDENTIALS environment variable
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
+        
+        # Initialize GCS client
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        
+        # List all blobs in the bucket
+        blobs = list(bucket.list_blobs())
+        downloaded_files = []
+        
+        print(f"Found {len(blobs)} files in bucket {bucket_name}")
+        
+        # Download each file
+        for blob in blobs:
+            # Skip directories (blobs ending with /)
+            if blob.name.endswith('/'):
+                continue
+                
+            # Create local path preserving directory structure
+            local_path = models_dir / blob.name
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            print(f"Downloading {blob.name} to {local_path}")
+            
+            # Download the blob to local file
+            blob.download_to_filename(str(local_path))
+            downloaded_files.append(str(local_path))
+        
+        # Clean up credentials file
+        os.unlink(credentials_path)
+        
+        return {
+            "status": "success",
+            "message": f"Downloaded {len(downloaded_files)} files from {bucket_name}",
+            "downloaded_files": downloaded_files,
+            "models_directory": str(models_dir)
+        }
+        
+    except Exception as e:
+        # Clean up credentials file if it exists
+        if 'credentials_path' in locals():
+            try:
+                os.unlink(credentials_path)
+            except:
+                pass
+                
+        return {
+            "status": "error",
+            "error": f"Failed to download models: {str(e)}"
+        }
 
 
 def handler(job):
@@ -22,6 +102,11 @@ def handler(job):
     try:
         # Get input data (optional for nvidia-smi)
         job_input = job.get("input", {})
+        
+        # Check if this is a model download request
+        if job_input.get("action") == "download_models":
+            print("Processing model download request...")
+            return download_models_from_gcs()
         
         # Run nvidia-smi command to get GPU information
         print("Running nvidia-smi...")
