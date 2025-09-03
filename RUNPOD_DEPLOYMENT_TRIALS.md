@@ -1,11 +1,65 @@
-# RunPod Deployment Log
+# RunPod Deployment Trials
 
-## Overview
-This document tracks our journey to deploy a simple NVIDIA-SMI endpoint on RunPod Serverless, following official documentation step by step.
+## Executive Summary
 
-**Goal**: Create a working RunPod serverless endpoint that returns `nvidia-smi` output to verify GPU access.
+This document chronicles the complete journey of deploying a production-ready RunPod serverless endpoint with persistent storage, from initial failures to final success.
+
+**Goal**: Create a working RunPod serverless endpoint with GPU monitoring, file listing, and persistent 100GB network volume storage.
+
+## Trial Results Overview
+
+| Attempt | Approach | Status | Key Issues | Duration |
+|---------|----------|--------|------------|----------|
+| **#1** | FastAPI + Load Balancing | ❌ **FAILED** | Mixed patterns, GraphQL errors, worker quotas | Sept 2, 2024 |
+| **#2** | Manual Console Deployment | ⚠️ **PARTIAL** | Manual process, image hash errors | Sept 2, 2024 |
+| **#3** | GraphQL Automation | ✅ **WORKED** | Full CI/CD but with GraphQL complexity | Sept 2, 2024 |
+| **#4** | REST API Migration | ❌ **FAILED** | Schema validation, env format errors | Sept 3, 2025 |
+| **#5** | Volume-Enabled REST CI/CD | ✅ **SUCCESS** | Complete automation + persistent storage | Sept 3, 2025 |
+| **#6** | Timeout Configuration | ✅ **ENHANCED** | Configurable execution timeouts (1-24h) | Sept 3, 2025 |
+| **#7** | Runtime Secrets & Template Updates | ✅ **FINAL** | Secret injection + template reuse logic | Sept 3, 2025 |
+
+## Final Architecture Achieved
+
+```
+🐳 Docker Image → Google Artifact Registry
+      ↓
+🏗️ Template: 20GB container + 100GB local + secrets injection
+      ↓  
+📡 Endpoint: Template + 100GB network volume at /runpod-volume
+      ↓
+🔐 Runtime: Secrets available as environment variables
+      ↓
+📊 Result: Production-ready serverless GPU workload
+```
+
+## Key Learnings Summary
+
+### ✅ **What Works:**
+- **Queue-based serverless** (not Load Balancing) for auto-scaling workloads
+- **REST API** over GraphQL for template/endpoint management  
+- **Template reuse** with update logic (not timestamp-based recreation)
+- **Network volumes attached to endpoints** (not templates)
+- **Environment variable injection** for runtime secret access
+- **Multi-tier storage**: Container disk + local volume + network volume
+
+### ❌ **What Doesn't Work:**
+- Mixing FastAPI patterns with RunPod serverless handlers
+- GraphQL for CI/CD automation (REST is cleaner)
+- Array format for environment variables (must be objects)
+- Template proliferation with timestamps
+- Network volume attachment at template level
+- Raw JSON secrets without `jq -c .` preprocessing
+
+### 🔧 **Critical Gotchas:**
+- Worker quotas are shared across all endpoints
+- Template names must be unique per account
+- Network volumes must match datacenter locations
+- JSON parsing requires special character escaping
+- Endpoint updates must include `networkVolumeId` to persist volumes
 
 ---
+
+# Detailed Trial Documentation
 
 ## Attempt 1: Complex Setup with FastAPI + Load Balancing (FAILED)
 **Date**: Sept 2, 2024  
@@ -444,27 +498,25 @@ POST /v1/endpoints
 
 ---
 
-## Summary of All Attempts
+## Final Implementation Status
 
-### ❌ Attempt 1: Complex FastAPI + Load Balancing (FAILED)
-- Mixed patterns, GraphQL errors, worker quota issues
+### 🎉 **Production Deployment Achieved**
+- ✅ **Automated CI/CD**: Complete GitHub Actions workflow
+- ✅ **Persistent Storage**: 100GB network volume with model management
+- ✅ **Runtime Secrets**: Environment variables injected at deployment
+- ✅ **Template Management**: Smart update/reuse logic (no proliferation)
+- ✅ **Multi-GPU Support**: Configurable GPU types and datacenters
+- ✅ **Timeout Configuration**: 10 minutes to 24 hours execution limits
+- ✅ **File Management**: Directory listing and exploration via API
+- ✅ **Error Handling**: Comprehensive validation and debugging
 
-### ❌ Attempt 2: Manual Console Deployment (PARTIAL)
-- Following official docs, manual endpoint creation
+### 📊 **Current Endpoint Capabilities**
+1. **GPU Information**: Complete nvidia-smi output with detailed metrics
+2. **File Listing**: Explore any directory (`/runpod-volume`, `/workspace`, etc.)
+3. **Model Storage**: Persistent 100GB network volume at `/runpod-volume/`
+4. **S3 Integration**: RunPod S3-compatible API for model management
 
-### ✅ Attempt 3: GraphQL Automation (WORKED)
-- Full automated CI/CD with GraphQL API
-
-### ❌ Attempt 4: REST API Migration (FAILED)
-- Schema validation errors, invalid field formats
-
-### 🎉 Attempt 5: Volume-Enabled REST CI/CD (SUCCESS!)
-- Complete automation with proper volume management
-- Correct endpoint-level network volume attachment  
-- Multi-tier storage architecture
-- Full parameterization and error handling
-
-**Final Result**: Production-ready RunPod serverless deployment with 100GB persistent storage! 🚀
+**Status**: Production-ready serverless deployment with comprehensive functionality! 🚀
 
 ---
 
@@ -628,3 +680,175 @@ curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
 - 🚀 **Auto-scaling**: 0-2 workers with queue-based scaling
 
 **Status**: Fully operational serverless deployment with comprehensive model management! 🎉
+
+---
+
+## Attempt 7: Environment Variables & Template Update Issues (RESOLVED)
+**Date**: Sept 3, 2025  
+**Issues**: Secrets not available at runtime + Template proliferation problem
+
+### 🚨 **Critical Problems Identified:**
+
+#### **Problem 1: Secrets Not Available at Runtime** ❌
+- **Symptom**: GitHub Actions secrets available during build, but NOT in RunPod container
+- **Root Cause**: Secrets only exist in GitHub Actions context, not passed to RunPod template
+- **Impact**: GCP authentication and API keys unavailable inside running containers
+
+#### **Problem 2: Template Proliferation** ❌  
+- **Symptom**: New template created every deployment with timestamp suffix
+- **Root Cause**: Template name included `$(date +%s)` causing unique names each time
+- **Impact**: Templates never updated, endpoints used stale configurations
+
+#### **Problem 3: JSON Parsing Errors** ❌
+- **Symptom**: `jq: error: PRIVATE/0 is not defined` during template creation
+- **Root Cause**: GCP credentials JSON contains special characters breaking jq parsing
+- **Impact**: Template creation failing, deployment pipeline broken
+
+### ✅ **Solutions Implemented:**
+
+#### **Fix 1: Runtime Environment Variables**
+**Added secrets to RunPod template environment**:
+```bash
+# Compact GCP credentials first to avoid jq parsing issues
+GCP_CREDS_COMPACT=$(echo '${{ secrets.GCP_CREDENTIALS }}' | jq -c .)
+
+# Pass secrets as environment variables to template
+TEMPLATE_PAYLOAD=$(jq -n \
+  --arg gcpCreds "$GCP_CREDS_COMPACT" \
+  --arg runpodKey "${{ secrets.RUNPOD_API_KEY }}" \
+  '{
+    env: {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "PYTHONUNBUFFERED": "1", 
+      "GCP_CREDENTIALS": $gcpCreds,    # ✅ Now available at runtime
+      "RUNPOD_API_KEY": $runpodKey     # ✅ Now available at runtime
+    }
+  }')
+```
+
+**Result**: Secrets now accessible via `os.environ.get()` inside RunPod containers! 🔐
+
+#### **Fix 2: Template Reuse Logic**
+**Removed timestamp from template names**:
+```bash
+# Before (❌): New template every time
+TEMPLATE_NAME="nvidia-smi-prod-$(date +%s)"  
+
+# After (✅): Reusable template name  
+TEMPLATE_NAME="nvidia-smi-prod"
+```
+
+**Added template update logic**:
+```bash
+# Check if template exists
+EXISTING_TEMPLATE=$(echo "$TEMPLATES_RESPONSE" | jq -r ".[] | select(.name==\"$TEMPLATE_NAME\") | .id")
+
+if [ -n "$EXISTING_TEMPLATE" ]; then
+  # ✅ Update existing template with new Docker image
+  curl -X PATCH "/v1/templates/$EXISTING_TEMPLATE" -d "$TEMPLATE_PAYLOAD"
+else
+  # ✅ Create new template only if none exists
+  curl -X POST "/v1/templates" -d "$TEMPLATE_PAYLOAD"  
+fi
+```
+
+**Result**: Templates properly updated with new Docker images instead of creating duplicates! 🔄
+
+#### **Fix 3: JSON Credential Handling**  
+**Pre-process credentials to avoid jq errors**:
+```bash
+# ✅ Compact and validate JSON first
+GCP_CREDS_COMPACT=$(echo '${{ secrets.GCP_CREDENTIALS }}' | jq -c .)
+
+# ✅ Pass as string argument (not raw JSON)
+--arg gcpCreds "$GCP_CREDS_COMPACT"
+```
+
+**Result**: GCP credentials properly escaped and passed to templates! 📝
+
+#### **Fix 4: Network Volume in Endpoint Updates**
+**Ensure network volume stays attached during endpoint updates**:
+```bash
+# Before (❌): Only template and timeout updated
+UPDATE_RESPONSE=$(curl -X PATCH "/v1/endpoints/$ENDPOINT_ID" \
+  -d "{\"templateId\":\"$TEMPLATE_ID\",\"executionTimeoutMs\":$TIMEOUT}")
+
+# After (✅): Include network volume in updates  
+UPDATE_RESPONSE=$(curl -X PATCH "/v1/endpoints/$ENDPOINT_ID" \
+  -d "{\"templateId\":\"$TEMPLATE_ID\",\"executionTimeoutMs\":$TIMEOUT,\"networkVolumeId\":\"$VOLUME_ID\"}")
+```
+
+**Result**: Network volume remains attached even after endpoint updates! 💾
+
+### 🎯 **RunPod Serverless Architecture Understanding:**
+
+#### **Template vs Endpoint Relationship** 🏗️
+- **Template** = Blueprint (Docker image + environment + storage config)  
+- **Endpoint** = Running service that uses a template
+- **Network Volume** = Attached to ENDPOINT, not template
+- **Best Practice**: Update templates with new images, endpoints inherit changes
+
+#### **Deployment Flow** 🚀
+```
+1. Build Docker Image → GAR
+2. Update/Create Template with new image + secrets  
+3. Update Endpoint to use updated template
+4. Network volume automatically available at /runpod-volume/
+```
+
+### 🧪 **Verification Tests:**
+
+#### **Test 1: Environment Variables Available** ✅
+```bash
+# Test that secrets are accessible at runtime
+curl -X POST "https://api.runpod.ai/v2/$ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "test_env_vars"}}'
+
+# Expected: GCP_CREDENTIALS and RUNPOD_API_KEY both available
+```
+
+#### **Test 2: Network Volume Accessible** ✅  
+```bash
+# Test that persistent storage is mounted
+curl -X POST "https://api.runpod.ai/v2/$ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "list_files", "path": "/runpod-volume"}}'
+
+# Expected: Shows model directories (dwpose, musetalk, etc.)
+```
+
+#### **Test 3: Template Updates Working** ✅
+```bash
+# After pushing new code, template should update (not create new one)
+# Check RunPod console - should see same template name, updated timestamp
+```
+
+### 🎉 **Final Working State:**
+
+**✅ Environment Variables**: Secrets available at runtime via template env vars  
+**✅ Template Management**: Proper update/reuse logic, no proliferation  
+**✅ Network Volume**: Persistent 100GB storage at `/runpod-volume/`  
+**✅ JSON Parsing**: Clean credential handling with `jq -c .`  
+**✅ Endpoint Updates**: Network volume stays attached through updates  
+
+### 🔑 **Key Insights Learned:**
+
+1. **Runtime vs Build-time**: GitHub secrets need explicit passing to RunPod templates
+2. **Template Lifecycle**: Templates should be updated, not recreated constantly  
+3. **JSON Handling**: Special characters in secrets require careful escaping
+4. **Volume Attachment**: Network volumes belong to endpoints, not templates
+5. **Update Strategy**: PATCH endpoints must include all important configs
+
+### 📊 **Architecture Summary:**
+```
+🏗️ Template: Docker image + env vars (including secrets) + local storage
+📡 Endpoint: Template + network volume + scaling config
+💾 Storage: 20GB container + 100GB local + 100GB network volume
+🔐 Secrets: Available as environment variables at runtime
+🚀 Updates: Template updates automatically flow to endpoint
+```
+
+**Final Status**: Production-ready serverless deployment with proper secret management and persistent storage! 🎯
