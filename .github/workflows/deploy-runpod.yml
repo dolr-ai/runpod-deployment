@@ -255,7 +255,7 @@ jobs:
           EXISTING_ENDPOINT=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".[] | select(.name==\"$ENDPOINT_NAME\") | .id")
 
           if [ -n "$EXISTING_ENDPOINT" ] && [ "$EXISTING_ENDPOINT" != "null" ]; then
-            echo "🔄 Using existing endpoint: $EXISTING_ENDPOINT, updating with new template..."
+            echo "🔄 Endpoint exists: $EXISTING_ENDPOINT, updating with new template..."
             
             # Update existing endpoint with new template
             UPDATE_RESPONSE=$(curl -s -X PATCH "https://rest.runpod.io/v1/endpoints/$EXISTING_ENDPOINT" \
@@ -275,11 +275,24 @@ jobs:
             echo "✅ Endpoint updated with new template"
             ENDPOINT_ID="$EXISTING_ENDPOINT"
           else
-            echo "❌ No existing endpoint found with name: $ENDPOINT_NAME"
-            echo "Please create an endpoint manually first, or use a different endpoint name"
-            echo "Available endpoints:"
-            echo "$ENDPOINTS_RESPONSE" | jq -r '.[] | .name + " (ID: " + .id + ")"'
-            exit 1
+            echo "📡 Creating new endpoint..."
+
+            ENDPOINT_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
+
+            echo "Endpoint response: $ENDPOINT_RESPONSE"
+
+            ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.id')
+
+            if [ "$ENDPOINT_ID" = "null" ]; then
+              echo "❌ Endpoint creation failed"
+              echo "$ENDPOINT_RESPONSE"
+              exit 1
+            fi
+
+            echo "✅ Endpoint created: $ENDPOINT_ID"
           fi
 
           echo "endpoint_id=$ENDPOINT_ID" >> $GITHUB_OUTPUT
