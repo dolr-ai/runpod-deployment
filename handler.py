@@ -154,6 +154,9 @@ def handler(job):
     try:
         # Get input data (optional for nvidia-smi)
         job_input = job.get("input", {})
+        print(f"DEBUG: Received job_input: {job_input}")
+        print(f"DEBUG: Action value: '{job_input.get('action')}'")
+        print(f"DEBUG: Action type: {type(job_input.get('action'))}")
         
         # Check if this is a model download request
         if job_input.get("action") == "download_models":
