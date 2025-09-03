@@ -357,37 +357,44 @@ jobs:
           echo "- **Tip**: Symlink \`ln -s /runpod-volume /workspace/models\` for convenience" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🧪 Test Your Endpoint" >> $GITHUB_STEP_SUMMARY
+          echo "**⚠️ Replace YOUR_API_KEY with your actual RunPod API key**" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Test nvidia-smi endpoint" >> $GITHUB_STEP_SUMMARY
           echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Authorization: Bearer YOUR_API_KEY\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"test\": \"nvidia-smi\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Download models from GCS bucket (⏱️ Uses ${EXECUTION_TIMEOUT}s timeout)" >> $GITHUB_STEP_SUMMARY
           echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Authorization: Bearer YOUR_API_KEY\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"action\": \"download_models\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# List files in /workspace directory" >> $GITHUB_STEP_SUMMARY
           echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Authorization: Bearer YOUR_API_KEY\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/workspace\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# List files in /runpod-volume directory (persistent models)" >> $GITHUB_STEP_SUMMARY
           echo "curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  -H \"Authorization: Bearer YOUR_API_KEY\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -H \"Content-Type: application/json\" \\" >> $GITHUB_STEP_SUMMARY
           echo "  -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/runpod-volume\"}}'" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ⚡ Quick Test Commands" >> $GITHUB_STEP_SUMMARY
+          echo "**Set your API key:** \`export RUNPOD_API_KEY=your_api_key_here\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "**1. Test GPU Access:**" >> $GITHUB_STEP_SUMMARY
-          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"test\": \"nvidia-smi\"}}'\`" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Authorization: Bearer \$RUNPOD_API_KEY\" -H \"Content-Type: application/json\" -d '{\"input\": {\"test\": \"nvidia-smi\"}}'\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**2. Download All Models (⏱️ ${EXECUTION_TIMEOUT}s timeout):**" >> $GITHUB_STEP_SUMMARY
-          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"download_models\"}}'\`" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Authorization: Bearer \$RUNPOD_API_KEY\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"download_models\"}}'\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**3. List Downloaded Models:**" >> $GITHUB_STEP_SUMMARY
-          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/runpod-volume\"}}'\`" >> $GITHUB_STEP_SUMMARY
+          echo "\`curl -X POST \"https://api.runpod.ai/v2/$ENDPOINT_ID/runsync\" -H \"Authorization: Bearer \$RUNPOD_API_KEY\" -H \"Content-Type: application/json\" -d '{\"input\": {\"action\": \"list_files\", \"path\": \"/runpod-volume\"}}'\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 RunPod Dashboard" >> $GITHUB_STEP_SUMMARY
           echo "- [Endpoint Dashboard](https://www.runpod.io/console/serverless/$ENDPOINT_ID)" >> $GITHUB_STEP_SUMMARY

@@ -523,3 +523,108 @@ Massive Datasets (>20GB): 4+ hours
 ```
 
 This ensures model downloads complete successfully without timeout failures! ⏱️
+
+---
+
+## Final Updates: Authentication & File Management
+**Date**: Sept 3, 2025  
+**Enhancement**: Added Bearer token authentication and file listing capabilities
+
+### 🔐 **Authentication Requirements:**
+RunPod serverless endpoints require Bearer token authentication for API calls.
+
+#### **API Key Setup:**
+```bash
+# Set your RunPod API key as environment variable
+export RUNPOD_API_KEY=your_runpod_api_key_here
+```
+
+#### **Authenticated API Calls:**
+```bash
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"test": "nvidia-smi"}}'
+```
+
+### 📂 **New File Management Endpoint:**
+Added `list_files` action for directory exploration and model verification.
+
+#### **File Listing Usage:**
+```bash
+# List workspace files
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "list_files", "path": "/workspace"}}'
+
+# List downloaded models  
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "list_files", "path": "/runpod-volume"}}'
+```
+
+#### **File Listing Response:**
+```json
+{
+  "status": "success",
+  "path": "/runpod-volume/models",
+  "directories": [
+    {"name": "musetalk", "path": "/runpod-volume/models/musetalk", "type": "directory"}
+  ],
+  "files": [
+    {"name": "model.pth", "path": "/runpod-volume/models/model.pth", "size": 2048576, "type": "file"}
+  ],
+  "total_files": 47,
+  "total_directories": 8
+}
+```
+
+### 🧪 **Complete Testing Workflow:**
+
+#### **1. Test GPU Access:**
+```bash
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"test": "nvidia-smi"}}'
+```
+
+#### **2. Download Models (with timeout):**
+```bash
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "download_models"}}'
+```
+
+#### **3. Verify Downloaded Models:**
+```bash
+curl -X POST "https://api.runpod.ai/v2/ENDPOINT_ID/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"action": "list_files", "path": "/runpod-volume"}}'
+```
+
+### 📊 **Expected Model Structure:**
+```
+/runpod-volume/models/
+├── duwgan/           (Deep learning models)
+├── face-parse-bisent/ (Face parsing models)  
+├── musetalk/         (Audio-visual models)
+├── musetalkV15/      (Updated models)
+├── sd-vae/           (Stable diffusion VAE)
+├── syncnet/          (Audio-video sync)
+└── whisper/          (Speech recognition)
+```
+
+### ✅ **Production Ready Features:**
+- 🔐 **Authentication**: Bearer token security
+- ⏱️ **Configurable Timeouts**: 1-24 hour execution limits  
+- 💾 **Persistent Storage**: 100GB network volume
+- 📂 **File Management**: Directory listing and exploration
+- 🧪 **Complete Testing**: GPU, download, and verification endpoints
+- 🚀 **Auto-scaling**: 0-2 workers with queue-based scaling
+
+**Status**: Fully operational serverless deployment with comprehensive model management! 🎉
