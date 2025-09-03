@@ -304,9 +304,164 @@ curl --request POST \
   }'
 ```
 
-### Status
-**NEEDS FIX**: Update workflow env format from array to object structure.
+### Status  
+**FULLY IMPLEMENTED**: Complete REST API migration with volume management.
+
+### Issues Fixed
+1. **Environment Variables Format**: Changed from array `[{"key":"value"}]` to object `{"key":"value"}`
+2. **Invalid Fields**: Removed `dockerArgs` (not in schema)
+3. **Volume Integration**: Added `volumeInGb`, `volumeMountPath`, `networkVolumeId` support
+
+### Final Implementation
+**Complete REST API Schema Used**:
+```json
+{
+  "name": "$TEMPLATE_NAME",
+  "imageName": "$IMAGE_URL",
+  "containerDiskInGb": 20,
+  "volumeInGb": 100,
+  "volumeMountPath": "/workspace",
+  "networkVolumeId": "$VOLUME_ID",
+  "env": {"CUDA_VISIBLE_DEVICES": "0"},
+  "containerRegistryAuthId": "auth-id"
+}
+```
+
+**New Features Added**:
+- ✅ **Network Volume Management**: 100GB persistent storage
+- ✅ **Volume Reuse Logic**: Finds existing volumes by name
+- ✅ **Multi-tier Storage**: Container disk + local volume + network volume
+- ✅ **Datacenter Configuration**: US-KS-2 (configurable)
+- ✅ **Complete Error Handling**: Volume and template creation failures
+
+## Attempt 5: Complete Volume-Enabled CI/CD (CURRENT)
+**Date**: Sept 3, 2025  
+**Approach**: Full REST API automation with comprehensive volume management for model storage
+
+### Architecture Overview
+**Multi-Tier Storage Strategy**:
+1. **Container Disk**: 20GB temporary storage (wiped on restart)
+2. **Local Volume**: 100GB at `/workspace` (persistent across restarts)  
+3. **Network Volume**: 100GB shared storage for models (persistent across deployments)
+
+### Workflow Implementation
+
+#### Step 1: Network Volume Management
+```bash
+# Creates or reuses existing volume
+POST /v1/networkvolumes
+{
+  "name": "model-storage-{env}",
+  "size": 100,
+  "dataCenterId": "US-KS-2"
+}
+```
+
+#### Step 2: Template Creation with Volume Attachment
+```bash
+POST /v1/templates
+{
+  "name": "nvidia-smi-{env}-{timestamp}",
+  "imageName": "{docker-image-url}",
+  "containerDiskInGb": 20,
+  "volumeInGb": 100, 
+  "volumeMountPath": "/workspace",
+  "networkVolumeId": "{volume-id}",
+  "env": {"CUDA_VISIBLE_DEVICES": "0"},
+  "containerRegistryAuthId": "{registry-auth-id}"
+}
+```
+
+#### Step 3: Serverless Endpoint Creation
+```bash
+POST /v1/endpoints
+{
+  "name": "nvidia-smi-{env}",
+  "templateId": "{template-id}",
+  "gpuTypeIds": ["{gpu-type}"],
+  "workersMin": 0,
+  "workersMax": 2,
+  "idleTimeout": 5,
+  "scalerType": "QUEUE_DELAY",
+  "scalerValue": 4
+}
+```
+
+### Benefits of This Approach
+- ✅ **Persistent Model Storage**: 100GB network volume survives endpoint updates
+- ✅ **Cost Efficient**: Volume reuse prevents duplicate storage charges
+- ✅ **Flexible Storage**: Multiple mount points for different use cases  
+- ✅ **Scalable**: Network volumes can be shared across multiple endpoints
+- ✅ **Automated**: Zero manual intervention required
+
+### Expected Deployment Flow
+```
+📦 Build Docker Image
+  ↓
+💾 Create/Find 100GB Network Volume  
+  ↓
+🏗️ Create Template with Volume Attached
+  ↓
+🚀 Create/Update Serverless Endpoint
+  ↓
+🧪 Test Endpoint Functionality
+  ↓
+📊 Generate Deployment Summary
+```
+
+### Storage Access in Container
+- **Network Volume**: Mounted at `/runpod-volume/` (100GB persistent)
+- **Local Volume**: Mounted at `/workspace/` (100GB temporary persistent)
+- **Container Disk**: Available at `/` (20GB temporary)
+
+**Model Storage Recommendation**: 
+- Store models in `/runpod-volume/` for persistence across deployments and endpoint updates
+- Use `/workspace/` for temporary processing files
+- Consider symlinking: `ln -s /runpod-volume /workspace/models` for convenience
+
+**Important**: Network volumes attach to ENDPOINTS, not templates. Template creation was fixed to remove invalid `networkVolumeId` field.
+
+### 🎉 SUCCESS! Deployment Working
+**Status**: ✅ **FULLY OPERATIONAL** - Complete volume-enabled CI/CD working as expected!
+
+**What Works**:
+- ✅ 100GB Network volume creation/reuse in configurable datacenter
+- ✅ Template creation with proper storage configuration (no invalid fields)
+- ✅ Endpoint creation with network volume attachment via `networkVolumeId`
+- ✅ Multi-tier storage: 20GB container + 100GB local + 100GB network volume
+- ✅ Proper mount paths: `/runpod-volume/` for network, `/workspace/` for local
+- ✅ Complete parameterization with configurable GPU types and datacenters
+- ✅ Comprehensive deployment summary with storage guidance
+
+**Key Learning**: Network volumes must be attached to ENDPOINTS (via `networkVolumeId` in endpoint creation), NOT templates. Templates only support local storage configuration.
+
+**Final Architecture**:
+```
+🏗️ Template: Container disk (20GB) + Local volume (100GB at /workspace)
+📡 Endpoint: Template + Network volume (100GB at /runpod-volume) 
+🚀 Result: Multi-tier persistent storage for serverless workloads
+```
 
 ---
 
-*This document will be updated as we progress through the deployment...*
+## Summary of All Attempts
+
+### ❌ Attempt 1: Complex FastAPI + Load Balancing (FAILED)
+- Mixed patterns, GraphQL errors, worker quota issues
+
+### ❌ Attempt 2: Manual Console Deployment (PARTIAL)
+- Following official docs, manual endpoint creation
+
+### ✅ Attempt 3: GraphQL Automation (WORKED)
+- Full automated CI/CD with GraphQL API
+
+### ❌ Attempt 4: REST API Migration (FAILED)
+- Schema validation errors, invalid field formats
+
+### 🎉 Attempt 5: Volume-Enabled REST CI/CD (SUCCESS!)
+- Complete automation with proper volume management
+- Correct endpoint-level network volume attachment  
+- Multi-tier storage architecture
+- Full parameterization and error handling
+
+**Final Result**: Production-ready RunPod serverless deployment with 100GB persistent storage! 🚀
