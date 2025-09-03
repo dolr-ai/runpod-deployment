@@ -166,7 +166,7 @@ jobs:
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d "{\"name\":\"$TEMPLATE_NAME\",\"imageName\":\"$IMAGE_URL\",\"containerDiskInGb\":$CONTAINER_DISK_SIZE,\"volumeInGb\":$LOCAL_VOLUME_SIZE,\"volumeMountPath\":\"/workspace\",\"networkVolumeId\":\"$VOLUME_ID\",\"env\":{\"CUDA_VISIBLE_DEVICES\":\"0\"},\"containerRegistryAuthId\":\"cmf2s9lsv0001jl0267lkqfxq\"}")
+            -d "{\"name\":\"$TEMPLATE_NAME\",\"imageName\":\"$IMAGE_URL\",\"containerDiskInGb\":$CONTAINER_DISK_SIZE,\"volumeInGb\":$LOCAL_VOLUME_SIZE,\"volumeMountPath\":\"/workspace\",\"env\":{\"CUDA_VISIBLE_DEVICES\":\"0\"},\"containerRegistryAuthId\":\"cmf2s9lsv0001jl0267lkqfxq\"}")
 
           echo "Raw template response: $TEMPLATE_RESPONSE"
 
@@ -202,10 +202,12 @@ jobs:
           TEMPLATE_ID="${{ steps.template.outputs.template_id }}"
           ENDPOINT_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}"
           GPU_TYPE="${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}"
+          VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
 
           echo "Creating endpoint: $ENDPOINT_NAME"
           echo "Template: $TEMPLATE_ID"
           echo "GPU: $GPU_TYPE"
+          echo "Network Volume: $VOLUME_ID"
 
           # Check if endpoint exists using REST API
           ENDPOINTS_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/endpoints" \
@@ -224,7 +226,7 @@ jobs:
             ENDPOINT_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4}")
+              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
 
             echo "Endpoint response: $ENDPOINT_RESPONSE"
 
@@ -301,7 +303,12 @@ jobs:
           echo "### 💾 Storage Configuration" >> $GITHUB_STEP_SUMMARY
           echo "- **Container Disk**: ${CONTAINER_DISK_SIZE}GB (temporary)" >> $GITHUB_STEP_SUMMARY
           echo "- **Local Volume**: ${LOCAL_VOLUME_SIZE}GB at \`/workspace\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Network Volume**: ${VOLUME_SIZE}GB persistent storage for models" >> $GITHUB_STEP_SUMMARY
+          echo "- **Network Volume**: ${VOLUME_SIZE}GB at \`/runpod-volume\` (persistent)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📁 Storage Access Guide" >> $GITHUB_STEP_SUMMARY
+          echo "- **Models/Data**: Store in \`/runpod-volume/\` for persistence" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workspace**: Use \`/workspace/\` for temporary files" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tip**: Symlink \`ln -s /runpod-volume /workspace/models\` for convenience" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🧪 Test Your Endpoint" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
