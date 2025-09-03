@@ -5,7 +5,7 @@ Production-ready CI/CD pipeline for RunPod serverless GPU workloads with automat
 ## Features
 
 - 🐳 **Automated Docker builds** to Google Artifact Registry
-- 💾 **100GB persistent network volume** for model storage  
+- 💾 **100GB persistent network volume** for model storage
 - 🔧 **Template and endpoint** lifecycle management
 - 🔐 **Runtime environment variables** (secrets injection)
 - 🧪 **Automated testing** and deployment verification
@@ -14,8 +14,8 @@ Production-ready CI/CD pipeline for RunPod serverless GPU workloads with automat
 ## Architecture
 
 ### Storage Architecture
-- **Container Disk**: 20GB temporary 
-- **Local Volume**: 100GB at `/workspace` (temporary persistent)  
+- **Container Disk**: 20GB temporary
+- **Local Volume**: 100GB at `/workspace` (temporary persistent)
 - **Network Volume**: 100GB at `/runpod-volume` (persistent across deployments)
 
 ### Handler Functions
@@ -28,7 +28,7 @@ The deployed endpoint (`handler.py`) supports:
 # GPU info (no action specified)
 {"input": {}}
 
-# List network volume models  
+# List network volume models
 {"input": {"action": "list_files", "path": "/runpod-volume"}}
 
 # List any directory
@@ -54,12 +54,12 @@ Since the handler doesn't include model downloading functionality, you'll need R
 ```bash
 # For RunPod S3 operations (configure with aws configure)
 AWS_ACCESS_KEY_ID     # RunPod S3 access key
-AWS_SECRET_ACCESS_KEY # RunPod S3 secret key  
+AWS_SECRET_ACCESS_KEY # RunPod S3 secret key
 AWS_DEFAULT_REGION=us-ks-2  # Your RunPod datacenter region
 ```
 
 **RunPod S3 Configuration:**
-- **Endpoint**: `https://s3api-us-ks-2.runpod.io` 
+- **Endpoint**: `https://s3api-us-ks-2.runpod.io`
 - **Bucket**: Your network volume ID (e.g., `mjjt5bmlew`)
 - **Region**: Matches your datacenter selection (`us-ks-2`)
 
@@ -142,9 +142,9 @@ curl -X POST "https://api.runpod.ai/v2/{ENDPOINT_ID}/runsync" \
 
 ### File Organization
 ```
-/runpod-volume/           # Persistent storage (survives deployments)  
+/runpod-volume/           # Persistent storage (survives deployments)
 ├── models/              # ML models - dwpose, musetalk, face-parse-bisent, whisper
-├── datasets/            # Training data  
+├── datasets/            # Training data
 └── .cache/              # Dependencies
 
 /workspace/              # Temporary storage (survives restarts only)
@@ -207,7 +207,7 @@ git push origin main  # Triggers deployment to production
 ### GitHub Actions Summary
 After each deployment, you'll get a detailed summary with:
 - ✅ Deployment status and configuration
-- 🔧 Endpoint ID and template information  
+- 🔧 Endpoint ID and template information
 - 💾 Storage configuration details
 - 🧪 Test commands for immediate verification
 - 📊 Links to RunPod dashboard
@@ -224,7 +224,7 @@ Modify the following in the workflow:
 ```yaml
 env:
   GAR_LOCATION: us-central1
-  GAR_REPOSITORY: your-registry-name  
+  GAR_REPOSITORY: your-registry-name
   PROJECT_ID: your-gcp-project
   IMAGE_NAME: your-image-name
 ```
@@ -233,7 +233,7 @@ env:
 Adjust storage allocation in the workflow:
 ```yaml
 VOLUME_SIZE=100          # Network volume (GB)
-LOCAL_VOLUME_SIZE=100    # Local volume (GB) 
+LOCAL_VOLUME_SIZE=100    # Local volume (GB)
 CONTAINER_DISK_SIZE=20   # Container disk (GB)
 ```
 
@@ -242,7 +242,7 @@ Environment variables are injected into the template:
 ```yaml
 env:
   CUDA_VISIBLE_DEVICES: "0"
-  PYTHONUNBUFFERED: "1" 
+  PYTHONUNBUFFERED: "1"
   GCP_CREDENTIALS: # From GitHub secrets
   RUNPOD_API_KEY: # From GitHub secrets
 ```
@@ -261,7 +261,7 @@ env:
 - Check volume quotas in RunPod console
 - Verify volume exists and is active
 
-**3. Secret Access Issues** 
+**3. Secret Access Issues**
 - Ensure GitHub secrets are properly configured
 - Check secret names match exactly: `GCP_CREDENTIALS`, `RUNPOD_API_KEY`
 - Verify JSON format for GCP credentials
@@ -291,7 +291,7 @@ Check GitHub Actions logs for detailed information:
 - **Idle Timeout**: 5 seconds (quick scale-down)
 - **Scaler Type**: Queue-based (efficient for serverless)
 
-### Storage Efficiency  
+### Storage Efficiency
 - Use network volume for persistent data only
 - Store temporary files in local volume or container disk
 - Clean up unused models and datasets regularly
@@ -308,15 +308,3 @@ Check GitHub Actions logs for detailed information:
 3. Make your changes
 4. Test deployment in development environment
 5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For issues and questions:
-- 🐛 **Bugs**: Open an issue in this repository
-- 📚 **Documentation**: Check RunPod official docs
-- 💬 **Discussions**: Use GitHub Discussions for questions
-- 🔧 **RunPod Support**: Contact help@runpod.io
