@@ -245,13 +245,14 @@ jobs:
           ENDPOINT_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}"
           GPU_TYPE="${{ github.event.inputs.gpu_type || 'NVIDIA RTX A4000' }}"
           VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
-          EXECUTION_TIMEOUT="${{ github.event.inputs.execution_timeout || '3600' }}"
+          EXECUTION_TIMEOUT_SECONDS="${{ github.event.inputs.execution_timeout || '3600' }}"
+          EXECUTION_TIMEOUT_MS=$((EXECUTION_TIMEOUT_SECONDS * 1000))
 
           echo "Creating endpoint: $ENDPOINT_NAME"
           echo "Template: $TEMPLATE_ID"
           echo "GPU: $GPU_TYPE"
           echo "Network Volume: $VOLUME_ID"
-          echo "Execution Timeout: ${EXECUTION_TIMEOUT}s"
+          echo "Execution Timeout: ${EXECUTION_TIMEOUT_SECONDS}s (${EXECUTION_TIMEOUT_MS}ms)"
 
           # Check if endpoint exists using REST API
           ENDPOINTS_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/endpoints" \
@@ -270,7 +271,7 @@ jobs:
             ENDPOINT_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"executionTimeout\":$EXECUTION_TIMEOUT,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
+              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
 
             echo "Endpoint response: $ENDPOINT_RESPONSE"
 
