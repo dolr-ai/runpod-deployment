@@ -17,14 +17,14 @@ on:
       gpu_type:
         description: "GPU type"
         required: false
-        default: "NVIDIA RTX A4000"
+        default: "NVIDIA RTX A5000"
         type: choice
         options:
-          - NVIDIA A40
-          - NVIDIA RTX A5000
-          - NVIDIA RTX A4000
-          - NVIDIA RTX 4090
-          - NVIDIA RTX 3090
+          - NVIDIA RTX A5000  # 24GB VRAM
+          - NVIDIA GeForce RTX 4090  # 24GB VRAM
+          - NVIDIA A40  # 48GB VRAM
+          - NVIDIA RTX A4000  # 16GB VRAM
+          - NVIDIA RTX 3090  # 24GB VRAM
       datacenter:
         description: "RunPod datacenter"
         required: false
@@ -44,15 +44,15 @@ on:
       execution_timeout:
         description: "Execution timeout (seconds)"
         required: false
-        default: "3600"
+        default: "600"
         type: choice
         options:
-          - "600"    # 10 minutes
-          - "1800"   # 30 minutes  
-          - "3600"   # 1 hour
-          - "7200"   # 2 hours
-          - "14400"  # 4 hours
-          - "86400"  # 24 hours
+          - "600" # 10 minutes
+          - "1800" # 30 minutes
+          - "3600" # 1 hour
+          - "7200" # 2 hours
+          - "14400" # 4 hours
+          - "86400" # 24 hours
 
 env:
   GAR_LOCATION: us-central1
@@ -108,49 +108,49 @@ jobs:
           VOLUME_NAME="model-storage-${{ github.event.inputs.environment || 'prod' }}"
           DATACENTER_ID="${{ github.event.inputs.datacenter || 'US-KS-2' }}"
           VOLUME_SIZE=100  # Network volume size in GB
-          LOCAL_VOLUME_SIZE=100  # Local volume size in GB  
+          LOCAL_VOLUME_SIZE=100  # Local volume size in GB
           CONTAINER_DISK_SIZE=20  # Container disk size in GB
-          
+
           echo "Looking for existing volume: $VOLUME_NAME"
-          
+
           # Check if volume exists
           VOLUMES_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/networkvolumes" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json")
-          
+
           EXISTING_VOLUME=$(echo "$VOLUMES_RESPONSE" | jq -r ".[] | select(.name==\"$VOLUME_NAME\") | .id")
-          
+
           if [ -n "$EXISTING_VOLUME" ] && [ "$EXISTING_VOLUME" != "null" ]; then
             echo "🔄 Using existing volume: $EXISTING_VOLUME"
             VOLUME_ID="$EXISTING_VOLUME"
           else
             echo "📦 Creating new network volume..."
-            
+
             VOLUME_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/networkvolumes" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
               -d "{\"name\":\"$VOLUME_NAME\",\"size\":$VOLUME_SIZE,\"dataCenterId\":\"$DATACENTER_ID\"}")
-            
+
             echo "Volume response: $VOLUME_RESPONSE"
-            
+
             # Check for errors
             if echo "$VOLUME_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
               echo "❌ Volume creation failed:"
               echo "$VOLUME_RESPONSE" | jq '.error'
               exit 1
             fi
-            
+
             VOLUME_ID=$(echo "$VOLUME_RESPONSE" | jq -r '.id')
-            
+
             if [ "$VOLUME_ID" = "null" ] || [ -z "$VOLUME_ID" ]; then
               echo "❌ Volume creation failed - no volume ID returned"
               echo "Full response: $VOLUME_RESPONSE"
               exit 1
             fi
-            
+
             echo "✅ Volume created: $VOLUME_ID"
           fi
-          
+
           echo "volume_id=$VOLUME_ID" >> $GITHUB_OUTPUT
           echo "volume_name=$VOLUME_NAME" >> $GITHUB_OUTPUT
           echo "volume_size=$VOLUME_SIZE" >> $GITHUB_OUTPUT
@@ -175,9 +175,6 @@ jobs:
           echo "Container Disk: ${CONTAINER_DISK_SIZE}GB"
 
           # Create template using REST API with configurable storage sizes
-          # Properly escape GCP credentials JSON for template payload
-          GCS_BUCKET="${{ secrets.GCS_BUCKET || 'talking-head-models' }}"
-          
           # Create JSON payload using jq to properly escape all values
           TEMPLATE_PAYLOAD=$(jq -n \
             --arg name "$TEMPLATE_NAME" \
@@ -185,8 +182,6 @@ jobs:
             --argjson containerDisk "$CONTAINER_DISK_SIZE" \
             --argjson volumeSize "$LOCAL_VOLUME_SIZE" \
             --arg volumePath "/workspace" \
-            --arg gcpCreds '${{ secrets.GCP_CREDENTIALS }}' \
-            --arg gcsBucket "$GCS_BUCKET" \
             --arg registryAuth "cmf2s9lsv0001jl0267lkqfxq" \
             '{
               name: $name,
@@ -196,15 +191,13 @@ jobs:
               volumeMountPath: $volumePath,
               env: {
                 "CUDA_VISIBLE_DEVICES": "0",
-                "PYTHONUNBUFFERED": "1",
-                "GCP_CREDENTIALS": $gcpCreds,
-                "GCS_BUCKET": $gcsBucket
+                "PYTHONUNBUFFERED": "1"
               },
               containerRegistryAuthId: $registryAuth
             }')
-          
+
           echo "Template payload (first 200 chars): $(echo "$TEMPLATE_PAYLOAD" | head -c 200)..."
-          
+
           TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json" \
@@ -258,11 +251,11 @@ jobs:
           ENDPOINTS_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/endpoints" \
             -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
             -H "Content-Type: application/json")
-          
+
           EXISTING_ENDPOINT=$(echo "$ENDPOINTS_RESPONSE" | jq -r ".[] | select(.name==\"$ENDPOINT_NAME\") | .id")
 
           if [ -n "$EXISTING_ENDPOINT" ] && [ "$EXISTING_ENDPOINT" != "null" ]; then
-            echo "🔄 Endpoint exists: $EXISTING_ENDPOINT, updating with new template..."
+            echo "🔄 Using existing endpoint: $EXISTING_ENDPOINT, updating with new template..."
             
             # Update existing endpoint with new template
             UPDATE_RESPONSE=$(curl -s -X PATCH "https://rest.runpod.io/v1/endpoints/$EXISTING_ENDPOINT" \
@@ -282,24 +275,11 @@ jobs:
             echo "✅ Endpoint updated with new template"
             ENDPOINT_ID="$EXISTING_ENDPOINT"
           else
-            echo "📡 Creating new endpoint..."
-
-            ENDPOINT_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/endpoints" \
-              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-              -H "Content-Type: application/json" \
-              -d "{\"name\":\"$ENDPOINT_NAME\",\"templateId\":\"$TEMPLATE_ID\",\"gpuTypeIds\":[\"$GPU_TYPE\"],\"workersMin\":0,\"workersMax\":2,\"idleTimeout\":5,\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS,\"scalerType\":\"QUEUE_DELAY\",\"scalerValue\":4,\"networkVolumeId\":\"$VOLUME_ID\"}")
-
-            echo "Endpoint response: $ENDPOINT_RESPONSE"
-
-            ENDPOINT_ID=$(echo "$ENDPOINT_RESPONSE" | jq -r '.id')
-
-            if [ "$ENDPOINT_ID" = "null" ]; then
-              echo "❌ Endpoint creation failed"
-              echo "$ENDPOINT_RESPONSE"
-              exit 1
-            fi
-
-            echo "✅ Endpoint created: $ENDPOINT_ID"
+            echo "❌ No existing endpoint found with name: $ENDPOINT_NAME"
+            echo "Please create an endpoint manually first, or use a different endpoint name"
+            echo "Available endpoints:"
+            echo "$ENDPOINTS_RESPONSE" | jq -r '.[] | .name + " (ID: " + .id + ")"'
+            exit 1
           fi
 
           echo "endpoint_id=$ENDPOINT_ID" >> $GITHUB_OUTPUT
