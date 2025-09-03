@@ -168,7 +168,20 @@ def handler(job):
             print("Processing file listing request...")
             return list_workspace_files(job_input.get("path", "/workspace"))
         
-        # Run nvidia-smi command to get GPU information
+        # If action is specified but not recognized, return error
+        if "action" in job_input:
+            return {
+                "status": "error",
+                "error": f"Unrecognized action: '{job_input.get('action')}'. Valid actions: 'download_models', 'list_files'",
+                "input_received": job_input,
+                "debug_info": {
+                    "action_value": job_input.get("action"),
+                    "action_type": str(type(job_input.get("action"))),
+                    "all_input_keys": list(job_input.keys())
+                }
+            }
+        
+        # Run nvidia-smi command to get GPU information (only when no action specified)
         print("Running nvidia-smi...")
         
         # Basic nvidia-smi output
