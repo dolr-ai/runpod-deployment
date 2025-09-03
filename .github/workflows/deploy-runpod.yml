@@ -162,17 +162,24 @@ jobs:
         id: template
         run: |
           IMAGE_URL="${{ steps.build.outputs.image_url }}"
-          TEMPLATE_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}-$(date +%s)"
+          TEMPLATE_NAME="nvidia-smi-${{ github.event.inputs.environment || 'prod' }}"
           VOLUME_ID="${{ steps.volume.outputs.volume_id }}"
           VOLUME_SIZE="${{ steps.volume.outputs.volume_size }}"
           LOCAL_VOLUME_SIZE="${{ steps.volume.outputs.local_volume_size }}"
           CONTAINER_DISK_SIZE="${{ steps.volume.outputs.container_disk_size }}"
 
-          echo "Creating template: $TEMPLATE_NAME"
+          echo "Creating/updating template: $TEMPLATE_NAME"
           echo "Image: $IMAGE_URL"
           echo "Network Volume: $VOLUME_ID (${VOLUME_SIZE}GB)"
           echo "Local Volume: ${LOCAL_VOLUME_SIZE}GB at /workspace"
           echo "Container Disk: ${CONTAINER_DISK_SIZE}GB"
+
+          # Check if template exists
+          TEMPLATES_RESPONSE=$(curl -s -X GET "https://rest.runpod.io/v1/templates" \
+            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+            -H "Content-Type: application/json")
+
+          EXISTING_TEMPLATE=$(echo "$TEMPLATES_RESPONSE" | jq -r ".[] | select(.name==\"$TEMPLATE_NAME\") | .id")
 
           # Create template using REST API with configurable storage sizes
           # Create JSON payload using jq to properly escape all values
@@ -183,6 +190,8 @@ jobs:
             --argjson volumeSize "$LOCAL_VOLUME_SIZE" \
             --arg volumePath "/workspace" \
             --arg registryAuth "cmf2s9lsv0001jl0267lkqfxq" \
+            --arg gcpCreds "${{ secrets.GCP_CREDENTIALS }}" \
+            --arg runpodKey "${{ secrets.RUNPOD_API_KEY }}" \
             '{
               name: $name,
               imageName: $image,
@@ -191,17 +200,34 @@ jobs:
               volumeMountPath: $volumePath,
               env: {
                 "CUDA_VISIBLE_DEVICES": "0",
-                "PYTHONUNBUFFERED": "1"
+                "PYTHONUNBUFFERED": "1",
+                "GCP_CREDENTIALS": $gcpCreds,
+                "RUNPOD_API_KEY": $runpodKey
               },
               containerRegistryAuthId: $registryAuth
             }')
 
           echo "Template payload (first 200 chars): $(echo "$TEMPLATE_PAYLOAD" | head -c 200)..."
 
-          TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
-            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "$TEMPLATE_PAYLOAD")
+          if [ -n "$EXISTING_TEMPLATE" ] && [ "$EXISTING_TEMPLATE" != "null" ]; then
+            echo "🔄 Updating existing template: $EXISTING_TEMPLATE"
+            
+            TEMPLATE_RESPONSE=$(curl -s -X PATCH "https://rest.runpod.io/v1/templates/$EXISTING_TEMPLATE" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "$TEMPLATE_PAYLOAD")
+            
+            TEMPLATE_ID="$EXISTING_TEMPLATE"
+          else
+            echo "📦 Creating new template..."
+            
+            TEMPLATE_RESPONSE=$(curl -s -X POST "https://rest.runpod.io/v1/templates" \
+              -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d "$TEMPLATE_PAYLOAD")
+              
+            TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.id // empty')
+          fi
 
           echo "Raw template response: $TEMPLATE_RESPONSE"
 
@@ -217,9 +243,6 @@ jobs:
             echo "❌ Empty or null template response"
             exit 1
           fi
-
-          # Extract template ID with better error handling for REST API
-          TEMPLATE_ID=$(echo "$TEMPLATE_RESPONSE" | jq -r '.id // empty')
 
           if [ -z "$TEMPLATE_ID" ] || [ "$TEMPLATE_ID" = "null" ]; then
             echo "❌ Template creation failed - no template ID returned"
