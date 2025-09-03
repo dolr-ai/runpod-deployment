@@ -280,11 +280,11 @@ jobs:
           if [ -n "$EXISTING_ENDPOINT" ] && [ "$EXISTING_ENDPOINT" != "null" ]; then
             echo "🔄 Endpoint exists: $EXISTING_ENDPOINT, updating with new template..."
             
-            # Update existing endpoint with new template
+            # Update existing endpoint with new template and ensure network volume is attached
             UPDATE_RESPONSE=$(curl -s -X PATCH "https://rest.runpod.io/v1/endpoints/$EXISTING_ENDPOINT" \
               -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d "{\"templateId\":\"$TEMPLATE_ID\",\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS}")
+              -d "{\"templateId\":\"$TEMPLATE_ID\",\"executionTimeoutMs\":$EXECUTION_TIMEOUT_MS,\"networkVolumeId\":\"$VOLUME_ID\"}")
             
             echo "Update response: $UPDATE_RESPONSE"
             
